@@ -77,6 +77,7 @@ const DT=[
 function fresh(){return{version:DV,bikes:[],leads:[],checklistTemplates:JSON.parse(JSON.stringify(DT))}}
 function load(){try{const r=localStorage.getItem(SK);if(!r)return fresh();const d=JSON.parse(r);if(!d.version)d.version=DV;if(!d.checklistTemplates)d.checklistTemplates=JSON.parse(JSON.stringify(DT));if(!d.leads)d.leads=[];d.leads.forEach(l=>{if(!l.knownIssues)l.knownIssues=[];if(!l.hiddenIssues)l.hiddenIssues=[];["year","make","model","askingPrice","estSellPrice","mileage","titleStatus","listingSource","flipDifficulty","partsAvailability","demandLevel","estDaysToSell","notes"].forEach(k=>{if(l[k]!=null&&typeof l[k]!=="string")l[k]=String(l[k])});if(l.status&&!{"watching":1,"pursue":1,"pass":1}[l.status])l.status="watching";l.knownIssues.forEach(i=>{if(i.cost!=null&&typeof i.cost!=="string")i.cost=String(i.cost)});l.hiddenIssues.forEach(i=>{if(i.cost!=null&&typeof i.cost!=="string")i.cost=String(i.cost)})});if(d.bikes)d.bikes=d.bikes.map(b=>{if(!b.checklistTemplates)b.checklistTemplates=JSON.parse(JSON.stringify(d.checklistTemplates));if(!b.tasks)b.tasks=[];return b});return d}catch{return fresh()}}
 function save(){try{localStorage.setItem(SK,JSON.stringify(data))}catch{}}
+function flash(msg){const el=document.createElement("div");el.textContent=msg||"Saved";Object.assign(el.style,{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 12px)",left:"50%",transform:"translateX(-50%)",background:"#22c55e",color:"#000",padding:"8px 20px",borderRadius:"8px",fontSize:"13px",fontWeight:"700",fontFamily:"var(--font)",zIndex:"9999",opacity:"1",transition:"opacity 0.3s"});document.body.appendChild(el);setTimeout(()=>{el.style.opacity="0";setTimeout(()=>el.remove(),300)},1200)}
 function mid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function S(v){return v==null?"":String(v)}
 
@@ -119,7 +120,7 @@ function calcMargin(l){const sell=parseFloat(S(l.estSellPrice).replace(/[^0-9.]/
 
 // Photo upload helper
 function photoUpload(leadId,afterCb){
-  const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.capture="environment";
+  const inp=document.createElement("input");inp.type="file";inp.accept="image/*";
   inp.onchange=function(){if(inp.files[0]){compressImg(inp.files[0],400,function(b64){const ld=data.leads.find(l=>l.id===leadId);if(ld){ld.photo=b64;ss();if(afterCb)afterCb()}})}};inp.click();
 }
 
@@ -221,7 +222,7 @@ function rPastePanel(){
           hiddenIssues:(p.hiddenIssues||[]).map(i=>({id:mid(),name:S(i.name),severity:i.severity||"low",difficulty:i.difficulty||"easy",cost:S(i.cost)})),
           createdAt:Date.now()
         };
-        data.leads.push(lead);ui.showPaste=0;ui.pasteTxt="";ui.pasteErr="";ss();R();
+        data.leads.push(lead);ui.showPaste=0;ui.pasteTxt="";ui.pasteErr="";save();R();flash("Lead imported");
       }catch(e){ui.pasteErr="Invalid JSON: "+e.message;R()}
     }},"Import Lead"),
     h("button",{class:"bs",onClick:()=>{ui.showPaste=0;ui.pasteTxt="";ui.pasteErr="";R()}},"Cancel")
@@ -282,7 +283,7 @@ function rLeadView(){
     const ntA=h("textarea",{rows:"3",placeholder:"Notes...",onInput:e=>{inps.notes=e.target.value}});ntA.value=lead.notes||"";inps.notes=lead.notes||"";p.append(ntA);
     p.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:()=>{ui.lEdit=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:()=>{
       ["year","make","model","askingPrice","estSellPrice","mileage","titleStatus","listingSource","flipDifficulty","partsAvailability","demandLevel","estDaysToSell","notes"].forEach(k=>{if(inps[k]!==undefined)lead[k]=(inps[k]||"").trim()});
-      lead.status=st_;ui.lEdit=0;ss();R()
+      lead.status=st_;ui.lEdit=0;save();R();flash()
     }},"Save")));root.append(p);
   }
 
@@ -322,12 +323,12 @@ function rLeadView(){
       const desc=["Mileage: "+(lead.mileage||"?"),"Title: "+(lead.titleStatus||"?"),lead.listingSource?"From: "+lead.listingSource:"",lead.flipDifficulty?"Flip: "+lead.flipDifficulty:"",lead.partsAvailability?"Parts: "+lead.partsAvailability:"",lead.demandLevel?"Demand: "+lead.demandLevel:"",lead.estDaysToSell?"Est. sell time: "+lead.estDaysToSell:"",lead.notes||""].filter(Boolean).join("\n");
       const tasks=(lead.knownIssues||[]).concat(lead.hiddenIssues||[]).map(iss=>({id:mid(),name:iss.name+(iss.cost?" (~$"+iss.cost+")":""),done:0,blocked:0,blockedReason:"",note:`Severity: ${iss.severity||"?"} | Difficulty: ${iss.difficulty||"?"}`}));
       data.bikes.push({id:mid(),name,type:"flip",description:desc.trim(),buyPrice:lead.askingPrice||"",targetSell:lead.estSellPrice||"",workLog:"",tasks,checklistTemplates:JSON.parse(JSON.stringify(data.checklistTemplates)),photo:lead.photo||null});
-      data.leads=data.leads.filter(l=>l.id!==lead.id);ss();nav("home")
+      data.leads=data.leads.filter(l=>l.id!==lead.id);save();nav("home");flash("Converted to bike")
     }},ic("convert")," Convert to Bike Slot"));
   }else root.append(h("p",{style:{color:"#555",fontSize:12,textAlign:"center",marginTop:12}},"2/2 bike slots full — finish one to convert"));
 
   // Delete
-  if(ui.cfDel===lead.id)root.append(confirm_("Delete this lead?",()=>{data.leads=data.leads.filter(l=>l.id!==lead.id);ss();nav("home")},()=>{ui.cfDel=null;R()}));
+  if(ui.cfDel===lead.id)root.append(confirm_("Delete this lead?",()=>{data.leads=data.leads.filter(l=>l.id!==lead.id);save();nav("home");flash("Lead deleted")},()=>{ui.cfDel=null;R()}));
   else root.append(h("button",{class:"bd",style:{marginTop:8},onClick:()=>{ui.cfDel=lead.id;R()}},"Delete lead"));
   return root;
 }
@@ -366,7 +367,7 @@ function rBikeView(){
     const bp=h("input",{type:"text",value:bike.buyPrice||"",placeholder:"Buy price",style:{flex:1}});
     const ts=h("input",{type:"text",value:bike.targetSell||"",placeholder:"Target sell",style:{flex:1}});
     p.append(ni,tr,di,h("div",{class:"f g8"},bp,ts));
-    p.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:()=>{ui.edit=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:()=>{bike.name=ni.value.trim()||bike.name;bike.type=ty;bike.description=di.value.trim();bike.buyPrice=bp.value.trim();bike.targetSell=ts.value.trim();ui.edit=0;ss();R()}},"Save")));
+    p.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:()=>{ui.edit=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:()=>{bike.name=ni.value.trim()||bike.name;bike.type=ty;bike.description=di.value.trim();bike.buyPrice=bp.value.trim();bike.targetSell=ts.value.trim();ui.edit=0;save();R();flash()}},"Save")));
     root.append(p)}
 
   const stats=h("div",{class:"f g12",style:{padding:"10px 0",borderTop:"1px solid #222",borderBottom:"1px solid #222"}});
@@ -427,7 +428,7 @@ function rSettings(){
   const ab=h("button",{class:"bg",onClick:()=>{data.checklistTemplates.push({id:mid(),name:"New Checklist",items:[]});ss();R()}});ab.innerHTML=I.plus+" Add template";root.append(ab);
   if(ui.cfDel==="reset-tmpl")root.append(confirm_("Reset all?",()=>{data.checklistTemplates=JSON.parse(JSON.stringify(DT));ui.cfDel=null;ss();R()},()=>{ui.cfDel=null;R()}));
   else root.append(h("button",{class:"bs",style:{alignSelf:"flex-start",marginTop:8},onClick:()=>{ui.cfDel="reset-tmpl";R()}},"Reset to defaults"));
-  root.append(h("div",{style:{marginTop:24,paddingTop:12,borderTop:"1px solid #222"}},h("p",{style:{color:"#555",fontSize:11}},"Moto Tracker v3.1 · Data v"+DV),h("p",{style:{color:"#555",fontSize:11,marginTop:4}},"Upgrade: download new file, data carries over")));
+  root.append(h("div",{style:{marginTop:24,paddingTop:12,borderTop:"1px solid #222"}},h("p",{style:{color:"#555",fontSize:11}},"Moto Tracker v3.3 · Data v"+DV),h("p",{style:{color:"#555",fontSize:11,marginTop:4}},"Upgrade: download new file, data carries over")));
   return root;
 }
 
