@@ -75,9 +75,10 @@ const DT=[
   {id:"sell",name:"Sell",items:["Runs and idles","All lights functional","Brakes working","Tires hold air","Oil level good / no active leaks","Chain tension and lube","Title in hand and ready to sign","Photos taken (all angles + detail shots)","Known issues documented for listing","Test ride completed","Listing price set from comps"]}
 ];
 function fresh(){return{version:DV,bikes:[],leads:[],checklistTemplates:JSON.parse(JSON.stringify(DT))}}
-function load(){try{const r=localStorage.getItem(SK);if(!r)return fresh();const d=JSON.parse(r);if(!d.version)d.version=DV;if(!d.checklistTemplates)d.checklistTemplates=JSON.parse(JSON.stringify(DT));if(!d.leads)d.leads=[];d.leads.forEach(l=>{if(!l.knownIssues)l.knownIssues=[];if(!l.hiddenIssues)l.hiddenIssues=[];});if(d.bikes)d.bikes=d.bikes.map(b=>{if(!b.checklistTemplates)b.checklistTemplates=JSON.parse(JSON.stringify(d.checklistTemplates));if(!b.tasks)b.tasks=[];return b});return d}catch{return fresh()}}
+function load(){try{const r=localStorage.getItem(SK);if(!r)return fresh();const d=JSON.parse(r);if(!d.version)d.version=DV;if(!d.checklistTemplates)d.checklistTemplates=JSON.parse(JSON.stringify(DT));if(!d.leads)d.leads=[];d.leads.forEach(l=>{if(!l.knownIssues)l.knownIssues=[];if(!l.hiddenIssues)l.hiddenIssues=[];["year","make","model","askingPrice","estSellPrice","mileage","titleStatus","listingSource","flipDifficulty","partsAvailability","demandLevel","estDaysToSell","notes"].forEach(k=>{if(l[k]!=null&&typeof l[k]!=="string")l[k]=String(l[k])});if(l.status&&!{"watching":1,"pursue":1,"pass":1}[l.status])l.status="watching";l.knownIssues.forEach(i=>{if(i.cost!=null&&typeof i.cost!=="string")i.cost=String(i.cost)});l.hiddenIssues.forEach(i=>{if(i.cost!=null&&typeof i.cost!=="string")i.cost=String(i.cost)})});if(d.bikes)d.bikes=d.bikes.map(b=>{if(!b.checklistTemplates)b.checklistTemplates=JSON.parse(JSON.stringify(d.checklistTemplates));if(!b.tasks)b.tasks=[];return b});return d}catch{return fresh()}}
 function save(){try{localStorage.setItem(SK,JSON.stringify(data))}catch{}}
 function mid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+function S(v){return v==null?"":String(v)}
 
 // Image compression
 function compressImg(file,maxW,cb){const r=new FileReader();r.onload=function(e){const img=new Image();img.onload=function(){let w=img.width,h=img.height;if(w>maxW){h=h*(maxW/w);w=maxW}const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);cb(c.toDataURL("image/jpeg",0.7))};img.src=e.target.result};r.readAsDataURL(file)}
@@ -114,7 +115,7 @@ function badge(t){const m={rider:{bg:"rgba(59,130,246,0.15)",c:"#60a5fa"},flip:{
 function confirm_(msg,onY,onN){return h("div",{class:"cb"},h("span",{style:{flex:1,color:"#ef4444",fontSize:12}},msg),h("button",{class:"bs",style:{color:"#ef4444",borderColor:"rgba(239,68,68,0.3)",background:"rgba(239,68,68,0.1)",padding:"6px 10px"},onClick:onY},"Yes"),h("button",{class:"bs",style:{padding:"6px 10px"},onClick:onN},"No"))}
 function ckbox(on,fn){const b=h("button",{class:"ck"+(on?" on":""),onClick:fn});b.innerHTML=I.check;return b}
 function calcRehab(l){return(l.knownIssues||[]).concat(l.hiddenIssues||[]).reduce((s,i)=>s+(parseFloat(i.cost)||0),0)}
-function calcMargin(l){const sell=parseFloat((l.estSellPrice||"").replace(/[^0-9.]/g,""))||0;const buy=parseFloat((l.askingPrice||"").replace(/[^0-9.]/g,""))||0;return sell-buy-calcRehab(l)}
+function calcMargin(l){const sell=parseFloat(S(l.estSellPrice).replace(/[^0-9.]/g,""))||0;const buy=parseFloat(S(l.askingPrice).replace(/[^0-9.]/g,""))||0;return sell-buy-calcRehab(l)}
 
 // Photo upload helper
 function photoUpload(leadId,afterCb){
@@ -210,14 +211,14 @@ function rPastePanel(){
         const p=JSON.parse(txt);
         if(!p.make&&!p.model&&!p.year){ui.pasteErr="Need at least year, make, or model";R();return}
         const lead={
-          id:mid(),year:p.year||"",make:p.make||"",model:p.model||"",
-          askingPrice:p.askingPrice||"",mileage:p.mileage||"",titleStatus:p.titleStatus||"",
-          listingSource:p.listingSource||"",estSellPrice:p.estSellPrice||"",
-          notes:p.notes||"",status:p.status||"watching",
-          flipDifficulty:p.flipDifficulty||"",partsAvailability:p.partsAvailability||"",
-          demandLevel:p.demandLevel||"",estDaysToSell:p.estDaysToSell||"",
-          knownIssues:(p.knownIssues||[]).map(i=>({id:mid(),name:i.name||"",severity:i.severity||"low",difficulty:i.difficulty||"easy",cost:i.cost||""})),
-          hiddenIssues:(p.hiddenIssues||[]).map(i=>({id:mid(),name:i.name||"",severity:i.severity||"low",difficulty:i.difficulty||"easy",cost:i.cost||""})),
+          id:mid(),year:S(p.year),make:S(p.make),model:S(p.model),
+          askingPrice:S(p.askingPrice),mileage:S(p.mileage),titleStatus:S(p.titleStatus),
+          listingSource:S(p.listingSource),estSellPrice:S(p.estSellPrice),
+          notes:S(p.notes),status:({"watching":"watching","pursue":"pursue","pass":"pass"}[p.status])||"watching",
+          flipDifficulty:S(p.flipDifficulty),partsAvailability:S(p.partsAvailability),
+          demandLevel:S(p.demandLevel),estDaysToSell:S(p.estDaysToSell),
+          knownIssues:(p.knownIssues||[]).map(i=>({id:mid(),name:S(i.name),severity:i.severity||"low",difficulty:i.difficulty||"easy",cost:S(i.cost)})),
+          hiddenIssues:(p.hiddenIssues||[]).map(i=>({id:mid(),name:S(i.name),severity:i.severity||"low",difficulty:i.difficulty||"easy",cost:S(i.cost)})),
           createdAt:Date.now()
         };
         data.leads.push(lead);ui.showPaste=0;ui.pasteTxt="";ui.pasteErr="";ss();R();
@@ -426,7 +427,7 @@ function rSettings(){
   const ab=h("button",{class:"bg",onClick:()=>{data.checklistTemplates.push({id:mid(),name:"New Checklist",items:[]});ss();R()}});ab.innerHTML=I.plus+" Add template";root.append(ab);
   if(ui.cfDel==="reset-tmpl")root.append(confirm_("Reset all?",()=>{data.checklistTemplates=JSON.parse(JSON.stringify(DT));ui.cfDel=null;ss();R()},()=>{ui.cfDel=null;R()}));
   else root.append(h("button",{class:"bs",style:{alignSelf:"flex-start",marginTop:8},onClick:()=>{ui.cfDel="reset-tmpl";R()}},"Reset to defaults"));
-  root.append(h("div",{style:{marginTop:24,paddingTop:12,borderTop:"1px solid #222"}},h("p",{style:{color:"#555",fontSize:11}},"Moto Tracker v3.0 · Data v"+DV),h("p",{style:{color:"#555",fontSize:11,marginTop:4}},"Upgrade: download new file, data carries over")));
+  root.append(h("div",{style:{marginTop:24,paddingTop:12,borderTop:"1px solid #222"}},h("p",{style:{color:"#555",fontSize:11}},"Moto Tracker v3.1 · Data v"+DV),h("p",{style:{color:"#555",fontSize:11,marginTop:4}},"Upgrade: download new file, data carries over")));
   return root;
 }
 
