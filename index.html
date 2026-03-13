@@ -157,21 +157,21 @@ function _doSync(){
     _syncing=0;var el=document.getElementById("sync-dot");if(el){el.style.background="#22c55e";el.title="Synced"}
   }).catch(function(e){_syncing=0;console.error("Sync push failed:",e);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"}})
 }
-function syncPull(cb){
+function syncPull(cb,force){
   if(!data.supabaseUrl||!data.supabaseKey){if(cb)cb();return}
   var url=data.supabaseUrl.replace(/\/$/,"")+"/rest/v1/sync?id=eq.main&select=data,updated_at";
   fetch(url,{method:"GET",headers:{"apikey":data.supabaseKey,"Authorization":"Bearer "+data.supabaseKey}})
   .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data){
       var remote=rows[0].data;var remoteTs=remote._ts||0;var localTs=data._ts||0;
-      if(remoteTs>localTs){
-        remote.supabaseUrl=data.supabaseUrl;remote.supabaseKey=data.supabaseKey;
+      if(force||remoteTs>localTs){
+        remote.supabaseUrl=data.supabaseUrl;remote.supabaseKey=data.supabaseKey;remote.apiKey=data.apiKey||remote.apiKey;
         data=migrate(remote);localStorage.setItem(SK,JSON.stringify(data));
         flash("Synced from cloud");R()
       }
-    }
+    }else if(force){flash("Nothing in cloud yet")}
     if(cb)cb()
-  }).catch(function(e){console.error("Sync pull failed:",e);if(cb)cb()})
+  }).catch(function(e){console.error("Sync pull failed:",e);flash("Sync pull failed");if(cb)cb()})
 }
 function flash(msg){var el=document.createElement("div");el.textContent=msg||"Saved";Object.assign(el.style,{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 12px)",left:"50%",transform:"translateX(-50%)",background:"#22c55e",color:"#000",padding:"8px 20px",borderRadius:"8px",fontSize:"13px",fontWeight:"700",fontFamily:"var(--font)",zIndex:"9999",opacity:"1",transition:"opacity 0.3s"});document.body.appendChild(el);setTimeout(function(){el.style.opacity="0";setTimeout(function(){el.remove()},300)},1200)}
 function mid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
@@ -602,7 +602,7 @@ function rSettings(){
   if(data.supabaseUrl&&data.supabaseKey){
     var syncRow=h("div",{class:"f g8"});
     syncRow.append(h("button",{class:"bs",style:{fontSize:"10px",color:"#60a5fa",borderColor:"rgba(96,165,250,0.3)"},onClick:function(){_doSync();flash("Pushing to cloud")}},"Push now"));
-    syncRow.append(h("button",{class:"bs",style:{fontSize:"10px",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)"},onClick:function(){syncPull(function(){R()});flash("Pulling from cloud")}},"Pull now"));
+    syncRow.append(h("button",{class:"bs",style:{fontSize:"10px",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)"},onClick:function(){syncPull(function(){R()},true);flash("Pulling from cloud")}},"Pull now"));
     root.append(syncRow);
     root.append(h("span",{style:{color:"#22c55e",fontSize:"11px"}},"Sync active"))
   }else{root.append(h("span",{style:{color:"#555",fontSize:"11px"}},"Add both fields to enable sync"))}
