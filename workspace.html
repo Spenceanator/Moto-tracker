@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Workspace">
+<meta name="theme-color" content="#0a0a0b">
+<title>Workspace</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; background: #0a0a0b; }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #252528; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #404040; }
+  ::selection { background: #3b82f640; color: #e2e8f0; }
+  input::placeholder, textarea::placeholder { opacity: 0.5; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ============ AUTH + SYNC (plain JS, runs before React) ============
+var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
+var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
+var AUTH_SK="drydock_auth";
+var SYNC_ID="workspace";
+function getAuth(){try{var s=JSON.parse(localStorage.getItem(AUTH_SK));if(s&&s.access_token&&s.expires_at>Date.now()/1000)return s}catch(e){}return null}
+function sbHeaders(){var a=getAuth();return{"apikey":SB_KEY,"Authorization":"Bearer "+(a?a.access_token:SB_KEY),"Content-Type":"application/json"}}
+if(!getAuth()){window.location.href="index.html"}
+
+var _wsSyncTimer=null,_wsSyncing=0,_wsLastPush=0,_wsPollInt=null,_wsLocalDirty=0;
+function wsSyncPush(data){
+  _wsLocalDirty=1;if(_wsSyncTimer)clearTimeout(_wsSyncTimer);
+  _wsSyncTimer=setTimeout(function(){_wsDoSync(data)},2000);
+}
+function _wsDoSync(data){
+  if(_wsSyncing||!getAuth())return;_wsSyncing=1;
+  var url=SB_URL+"/rest/v1/sync?id=eq."+SYNC_ID;
+  var body=JSON.stringify({id:SYNC_ID,data:data,updated_at:new Date().toISOString()});
+  fetch(url,{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
+    var method=rows.length>0?"PATCH":"POST";
+    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/sync";
+    var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
+    return fetch(postUrl,{method:method,headers:hdrs,body:body});
+  }).then(function(){
+    _wsSyncing=0;_wsLocalDirty=0;_wsLastPush=Date.now();wsStartPoll();
+  }).catch(function(e){_wsSyncing=0;console.error("WS sync push failed:",e)});
+}
+function wsSyncPull(cb){
+  if(!getAuth()){if(cb)cb(null);return}
+  fetch(SB_URL+"/rest/v1/sync?id=eq."+SYNC_ID+"&select=data,updated_at",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
+    if(rows.length>0&&rows[0].data){cb(rows[0].data)}else{cb(null)}
+  }).catch(function(e){console.error("WS sync pull failed:",e);cb(null)});
+}
+function wsStartPoll(){if(_wsPollInt)return;_wsPollInt=setInterval(wsPollCheck,15000)}
+function wsPollCheck(){
+  if(_wsSyncing||!getAuth())return;
+  fetch(SB_URL+"/rest/v1/sync?id=eq."+SYNC_ID+"&select=updated_at",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
+    if(!rows||rows.length===0)return;
+    var remoteTime=new Date(rows[0].updated_at).getTime();
+    if(remoteTime>_wsLastPush&&!_wsLocalDirty){
+      wsSyncPull(function(remote){if(remote&&window._wsApplyRemote)window._wsApplyRemote(remote)});
+    }
+  }).catch(function(){});
+}
+document.addEventListener("visibilitychange",function(){if(!document.hidden){wsPollCheck();wsStartPoll()}});
+</script>
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+const COLORS = [
+  { name: "slate", bg: "#1e293b", border: "#334155", text: "#e2e8f0", accent: "#64748b", tint: "#0f1520" },
+  { name: "ember", bg: "#451a03", border: "#92400e", text: "#fde68a", accent: "#d97706", tint: "#1a0f02" },
+  { name: "moss", bg: "#052e16", border: "#166534", text: "#bbf7d0", accent: "#22c55e", tint: "#04140a" },
+  { name: "ocean", bg: "#0c1a3d", border: "#1e40af", text: "#bfdbfe", accent: "#3b82f6", tint: "#060d1e" },
+  { name: "plum", bg: "#2e1065", border: "#6b21a8", text: "#e9d5ff", accent: "#a855f7", tint: "#150a2e" },
+  { name: "rust", bg: "#431407", border: "#9a3412", text: "#fed7aa", accent: "#ea580c", tint: "#1a0a04" },
+];
+const SL = ["ready", "blocked", "done"];
+const SM = { ready: { icon: "◆", color: "#22c55e", label: "ready" }, blocked: { icon: "■", color: "#ef4444", label: "blocked" }, done: { icon: "✓", color: "#525252", label: "done" } };
+const uid = () => Math.random().toString(36).substr(2, 9);
+const STORE = "ws-v7";
+const KEYS_STORE = "ws-keys-v1";
+const F = "'JetBrains Mono','SF Mono','Fira Code','Consolas',monospace";
+
+const DEFAULT_KEYS = {
+  goUp: { key: "Tab", mod: "", label: "go up a level" },
+  child: { key: "Enter", mod: "meta", label: "create child node" },
+  sibling: { key: "Enter", mod: "shift", label: "create linked sibling" },
+  addTask: { key: "/", mod: "", label: "add task" },
+  promote: { key: "[", mod: "", label: "promote node" },
+  demote: { key: "]", mod: "", label: "demote node" },
+  find: { key: "f", mod: "meta", label: "search" },
+  drillIn: { key: "Enter", mod: "", label: "drill into node" },
+};
+
+const modLabel = (mod) => { if (!mod) return ""; if (mod === "meta") return navigator.platform?.includes("Mac") ? "⌘+" : "ctrl+"; if (mod === "shift") return "shift+"; return mod + "+"; };
+const keyLabel = (k) => { if (k === " ") return "space"; if (k === "Tab") return "tab"; if (k === "Enter") return "enter"; if (k === "Backspace") return "backspace"; return k; };
+const fmtBind = (b) => `${modLabel(b.mod)}${keyLabel(b.key)}`;
+const matchBind = (e, b) => { if (!b) return false; const wM = b.mod === "meta"; const wS = b.mod === "shift"; if (wM && !(e.metaKey || e.ctrlKey)) return false; if (wS && !e.shiftKey) return false; if (!wM && (e.metaKey || e.ctrlKey)) return false; if (!wS && e.shiftKey) return false; return e.key === b.key || e.key.toLowerCase() === b.key.toLowerCase(); };
+const isToday = (ts) => { if (!ts) return false; const d = new Date(ts), n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); };
+const isRecent = (ts, days = 7) => ts && Date.now() - ts < days * 86400000;
+const fmtDate = (ts) => { if (!ts) return ""; if (isToday(ts)) return "today"; const d = new Date(ts); const y = new Date(); y.setDate(y.getDate() - 1); if (d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth() && d.getDate() === y.getDate()) return "yesterday"; return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()] + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()] + " " + d.getDate(); };
+
+const loadJSON = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } };
+const saveJSON = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} };
+
+function Workspace() {
+  const [nodes, setNodes] = useState([]);
+  const [viewParentId, setViewParentId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editingField, setEditingField] = useState(null);
+  const [dragState, setDragState] = useState(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState(null);
+  const [connections, setConnections] = useState([]);
+  const [connectingFrom, setConnectingFrom] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [taskInputNodeId, setTaskInputNodeId] = useState(null);
+  const [taskInputText, setTaskInputText] = useState("");
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editingTaskText, setEditingTaskText] = useState("");
+  const [editingBlockReason, setEditingBlockReason] = useState(null);
+  const [blockReasonText, setBlockReasonText] = useState("");
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelTab, setPanelTab] = useState("ready");
+  const [keyBindings, setKeyBindings] = useState(DEFAULT_KEYS);
+  const [remapOpen, setRemapOpen] = useState(false);
+  const [remapTarget, setRemapTarget] = useState(null);
+  const [legendVisible, setLegendVisible] = useState(true);
+
+  const canvasRef = useRef(null);
+  const titleRef = useRef(null);
+  const notesRef = useRef(null);
+  const searchRef = useRef(null);
+  const taskAddRef = useRef(null);
+  const taskEditRef = useRef(null);
+  const blockRef = useRef(null);
+
+  // Load
+  useEffect(() => {
+    // Try cloud first, fall back to local
+    wsSyncPull(function(remote) {
+      var data = remote || loadJSON(STORE, null);
+      if (data && data.nodes) {
+        setNodes(data.nodes.map((n) => ({ ...n, tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
+        setConnections(data.connections || []);
+        if (remote) { saveJSON(STORE, data); _wsLastPush = Date.now(); }
+      }
+      const keys = loadJSON(KEYS_STORE, null);
+      if (keys) setKeyBindings({ ...DEFAULT_KEYS, ...keys });
+      setLoaded(true);
+      wsStartPoll();
+    });
+  }, []);
+
+  // Remote apply callback
+  useEffect(() => {
+    window._wsApplyRemote = (remote) => {
+      if (remote && remote.nodes) {
+        setNodes(remote.nodes.map((n) => ({ ...n, tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
+        setConnections(remote.connections || []);
+        saveJSON(STORE, remote);
+      }
+    };
+    return () => { window._wsApplyRemote = null; };
+  }, []);
+
+  // Save (local + cloud)
+  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, _ts: Date.now() }; saveJSON(STORE, payload); wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, loaded]);
+  useEffect(() => { if (loaded) { const t = setTimeout(() => saveJSON(KEYS_STORE, keyBindings), 300); return () => clearTimeout(t); } }, [keyBindings, loaded]);
+
+  const visibleNodes = nodes.filter((n) => n.parentId === viewParentId);
+  const childCount = useCallback((id) => nodes.filter((n) => n.parentId === id).length, [nodes]);
+  const getNode = useCallback((id) => nodes.find((n) => n.id === id), [nodes]);
+  const getChildren = useCallback((id) => nodes.filter((n) => n.parentId === id), [nodes]);
+  const vpNode = viewParentId ? getNode(viewParentId) : null;
+  const vc = vpNode ? COLORS[vpNode.colorIdx] : null;
+
+  const readyCounts = useMemo(() => { const m = {}; const calc = (id) => { if (m[id] !== undefined) return m[id]; const nd = nodes.find((n) => n.id === id); if (!nd) return 0; let c = (nd.tasks || []).filter((t) => t.status === "ready").length; nodes.filter((n) => n.parentId === id).forEach((ch) => { c += calc(ch.id); }); m[id] = c; return c; }; nodes.forEach((n) => calc(n.id)); return m; }, [nodes]);
+  const buildPath = useCallback((nid) => { const p = []; let c = nid; while (c) { const nd = nodes.find((x) => x.id === c); if (!nd) break; p.unshift(nd); c = nd.parentId; } return p; }, [nodes]);
+  const allReadyTasks = useMemo(() => { const r = []; nodes.forEach((n) => (n.tasks || []).forEach((t) => { if (t.status === "ready") r.push({ task: t, node: n, path: buildPath(n.id) }); })); return r; }, [nodes, buildPath]);
+  const allBlockedTasks = useMemo(() => { const r = []; nodes.forEach((n) => (n.tasks || []).forEach((t) => { if (t.status === "blocked") r.push({ task: t, node: n, path: buildPath(n.id) }); })); return r; }, [nodes, buildPath]);
+  const doneToday = useMemo(() => { const r = []; nodes.forEach((n) => (n.tasks || []).forEach((t) => { if (t.status === "done" && isToday(t.completedAt)) r.push({ task: t, node: n, path: buildPath(n.id) }); })); r.sort((a, b) => (b.task.completedAt || 0) - (a.task.completedAt || 0)); return r; }, [nodes, buildPath]);
+  const doneRecent = useMemo(() => { const r = []; nodes.forEach((n) => (n.tasks || []).forEach((t) => { if (t.status === "done" && isRecent(t.completedAt) && !isToday(t.completedAt)) r.push({ task: t, node: n, path: buildPath(n.id) }); })); r.sort((a, b) => (b.task.completedAt || 0) - (a.task.completedAt || 0)); return r; }, [nodes, buildPath]);
+
+  const getBreadcrumbs = useCallback(() => { const r = []; let c = viewParentId; while (c) { const n = nodes.find((x) => x.id === c); if (!n) break; r.unshift(n); c = n.parentId; } r.unshift({ id: null, title: "root" }); return r; }, [viewParentId, nodes]);
+  const getAncestors = useCallback((id) => { const a = []; let c = nodes.find((n) => n.id === id)?.parentId; while (c) { const n = nodes.find((x) => x.id === c); if (!n) break; a.unshift(n); c = n.parentId; } return a; }, [nodes]);
+  const allDescIds = useCallback((id) => { const r = [], s = [id]; while (s.length) { const c = s.pop(); nodes.filter((n) => n.parentId === c).forEach((k) => { r.push(k.id); s.push(k.id); }); } return r; }, [nodes]);
+  const searchResults = useMemo(() => { if (!searchQuery.trim()) return []; const q = searchQuery.toLowerCase(); return nodes.filter((n) => n.title.toLowerCase().includes(q) || n.notes.toLowerCase().includes(q) || (n.tasks || []).some((t) => t.text.toLowerCase().includes(q))); }, [searchQuery, nodes]);
+  const navigateToNode = useCallback((id) => { const n = nodes.find((x) => x.id === id); if (!n) return; setViewParentId(n.parentId); setSelectedId(n.id); if (canvasRef.current) { const r = canvasRef.current.getBoundingClientRect(); setOffset({ x: r.width / 2 - n.x - 100, y: r.height / 2 - n.y - 30 }); } }, [nodes]);
+
+  const addNode = useCallback((pid, x, y, ci) => { const n = { id: uid(), parentId: pid, x, y, title: "", notes: "", colorIdx: ci, collapsed: false, tasks: [], created: Date.now() }; setNodes((p) => [...p, n]); setSelectedId(n.id); setEditingId(n.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); return n; }, []);
+  const updateNode = useCallback((id, u) => setNodes((p) => p.map((n) => n.id === id ? { ...n, ...u } : n)), []);
+  const deleteNode = useCallback((id) => { const rm = new Set([id, ...allDescIds(id)]); setNodes((p) => p.filter((n) => !rm.has(n.id))); setConnections((p) => p.filter((c) => !rm.has(c.from) && !rm.has(c.to))); if (selectedId === id) setSelectedId(null); setEditingId(null); }, [allDescIds, selectedId]);
+  const promoteNode = useCallback((id) => { const nd = getNode(id); if (!nd || !nd.parentId) return; const p = getNode(nd.parentId); if (!p) return; updateNode(id, { parentId: p.parentId, x: p.x + 220, y: p.y }); }, [getNode, updateNode]);
+  const demoteNode = useCallback((id) => { const nd = getNode(id); if (!nd) return; const sibs = nodes.filter((n) => n.parentId === nd.parentId && n.id !== id); if (!sibs.length) return; let cl = sibs[0], mn = Infinity; sibs.forEach((s) => { const d = Math.hypot(s.x - nd.x, s.y - nd.y); if (d < mn) { mn = d; cl = s; } }); const ex = nodes.filter((n) => n.parentId === cl.id); updateNode(id, { parentId: cl.id, x: 60, y: 60 + ex.length * 90 }); }, [getNode, nodes, updateNode]);
+
+  const addTask = useCallback((nid, text) => { if (!text.trim()) return; setNodes((p) => p.map((n) => n.id === nid ? { ...n, tasks: [...(n.tasks || []), { id: uid(), text: text.trim(), status: "ready", blockReason: "", completedAt: null }] } : n)); }, []);
+  const updateTask = useCallback((nid, tid, u) => { setNodes((p) => p.map((n) => n.id === nid ? { ...n, tasks: (n.tasks || []).map((t) => t.id === tid ? { ...t, ...u } : t) } : n)); }, []);
+  const cycleTaskStatus = useCallback((nid, tid) => { setNodes((p) => p.map((n) => { if (n.id !== nid) return n; return { ...n, tasks: (n.tasks || []).map((t) => { if (t.id !== tid) return t; const next = SL[(SL.indexOf(t.status) + 1) % 3]; return { ...t, status: next, completedAt: next === "done" ? Date.now() : (next === "ready" ? null : t.completedAt) }; })}; })); }, []);
+  const deleteTask = useCallback((nid, tid) => { setNodes((p) => p.map((n) => n.id === nid ? { ...n, tasks: (n.tasks || []).filter((t) => t.id !== tid) } : n)); }, []);
+
+  const startAddTask = useCallback((nid) => { setTaskInputNodeId(nid); setTaskInputText(""); setEditingTaskId(null); setTimeout(() => taskAddRef.current?.focus(), 50); }, []);
+  const stopAddTask = useCallback(() => { setTaskInputNodeId(null); setTaskInputText(""); }, []);
+  const startEditTask = useCallback((nid, tid, text) => { setEditingTaskId(tid); setEditingTaskText(text); setTaskInputNodeId(null); setTimeout(() => taskEditRef.current?.focus(), 50); }, []);
+  const commitEditTask = useCallback((nid) => { if (editingTaskId && editingTaskText.trim() && nid) updateTask(nid, editingTaskId, { text: editingTaskText.trim() }); setEditingTaskId(null); setEditingTaskText(""); }, [editingTaskId, editingTaskText, updateTask]);
+  const startEditBlock = useCallback((tid, r) => { setEditingBlockReason(tid); setBlockReasonText(r || ""); setTimeout(() => blockRef.current?.focus(), 50); }, []);
+  const commitBlock = useCallback((nid) => { if (editingBlockReason && nid) updateTask(nid, editingBlockReason, { blockReason: blockReasonText.trim() }); setEditingBlockReason(null); setBlockReasonText(""); }, [editingBlockReason, blockReasonText, updateTask]);
+
+  const quickChild = useCallback((pid) => { const p = getNode(pid); if (!p) return; setViewParentId(pid); setOffset({ x: 0, y: 0 }); setTimeout(() => { const ex = nodes.filter((n) => n.parentId === pid); addNode(pid, 60, 60 + ex.length * 90, p.colorIdx); }, 50); }, [getNode, nodes, addNode]);
+  const quickSibling = useCallback((nid) => { const nd = getNode(nid); if (!nd) return; const sibs = nodes.filter((n) => n.parentId === nd.parentId); let x = nd.x + 220, y = nd.y; const occ = sibs.map((s) => ({ x: s.x, y: s.y })); let t = 0; while (t < 20) { if (!occ.some((o) => Math.abs(o.x - x) < 200 && Math.abs(o.y - y) < 80)) break; y += 90; t++; } const n = addNode(nd.parentId, x, y, nd.colorIdx); setConnections((p) => [...p, { from: nid, to: n.id }]); }, [getNode, nodes, addNode]);
+
+  const handleCanvasDblClick = useCallback((e) => { if (e.target !== canvasRef.current && !e.target.classList.contains("ci")) return; const r = canvasRef.current.getBoundingClientRect(); const pn = viewParentId ? getNode(viewParentId) : null; addNode(viewParentId, e.clientX - r.left - offset.x, e.clientY - r.top - offset.y, pn?.colorIdx || 0); }, [offset, viewParentId, addNode, getNode]);
+  const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
+  const handleNodeMouseDown = useCallback((e, nid) => { if (e.button === 2) return; e.stopPropagation(); if (connectingFrom) { if (connectingFrom !== nid) { setConnections((p) => { const ex = p.some((c) => (c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom)); if (ex) return p.filter((c) => !((c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom))); return [...p, { from: connectingFrom, to: nid }]; }); } setConnectingFrom(null); return; } setSelectedId(nid); const nd = nodes.find((n) => n.id === nid); if (!nd) return; setDragState({ id: nid, sx: e.clientX, sy: e.clientY, ox: nd.x, oy: nd.y }); }, [nodes, connectingFrom]);
+
+  useEffect(() => { const mv = (e) => { if (dragState) setNodes((p) => p.map((n) => n.id === dragState.id ? { ...n, x: dragState.ox + e.clientX - dragState.sx, y: dragState.oy + e.clientY - dragState.sy } : n)); if (isPanning && panStart) setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); }; const up = () => { setDragState(null); setIsPanning(false); setPanStart(null); }; window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up); return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); }; }, [dragState, isPanning, panStart]);
+
+  const fieldKey = useCallback((e, nid, field) => {
+    const kids = childCount(nid);
+    if (matchBind(e, keyBindings.goUp)) { e.preventDefault(); setEditingId(null); setEditingField(null); if (viewParentId) { const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); } }
+    if (matchBind(e, keyBindings.sibling)) { e.preventDefault(); setEditingId(null); setEditingField(null); quickSibling(nid); }
+    if (matchBind(e, keyBindings.child)) { e.preventDefault(); setEditingId(null); setEditingField(null); quickChild(nid); }
+    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && field === "title") { e.preventDefault(); if (kids > 0) { setEditingId(null); setEditingField(null); setViewParentId(nid); setOffset({ x: 0, y: 0 }); setSelectedId(null); } else { setEditingField("notes"); setTimeout(() => notesRef.current?.focus(), 50); } }
+    if (e.key === "Escape") { setEditingId(null); setEditingField(null); }
+  }, [childCount, getNode, viewParentId, quickChild, quickSibling, keyBindings]);
+
+  useEffect(() => { if (!remapTarget) return; const h = (e) => { e.preventDefault(); e.stopPropagation(); let mod = ""; if (e.metaKey || e.ctrlKey) mod = "meta"; else if (e.shiftKey) mod = "shift"; if (["Meta","Control","Shift","Alt"].includes(e.key)) return; setKeyBindings((prev) => ({ ...prev, [remapTarget]: { ...prev[remapTarget], key: e.key, mod } })); setRemapTarget(null); }; window.addEventListener("keydown", h, true); return () => window.removeEventListener("keydown", h, true); }, [remapTarget]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (remapTarget) return;
+      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen;
+      if (matchBind(e, keyBindings.find)) { e.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }
+      if (e.key === "Escape") { if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
+      if (!busy) {
+        if (matchBind(e, keyBindings.goUp) && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
+        if (e.key === "Backspace" && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
+        if (selectedId) {
+          if (matchBind(e, keyBindings.sibling)) { e.preventDefault(); quickSibling(selectedId); }
+          else if (matchBind(e, keyBindings.child)) { e.preventDefault(); quickChild(selectedId); }
+          else if (matchBind(e, keyBindings.drillIn)) { const k = nodes.filter((n) => n.parentId === selectedId).length; if (k > 0) { e.preventDefault(); setViewParentId(selectedId); setOffset({ x: 0, y: 0 }); setSelectedId(null); } }
+          if (matchBind(e, keyBindings.addTask)) { e.preventDefault(); startAddTask(selectedId); }
+          if (matchBind(e, keyBindings.promote)) { e.preventDefault(); promoteNode(selectedId); }
+          if (matchBind(e, keyBindings.demote)) { e.preventDefault(); demoteNode(selectedId); }
+        }
+        if (e.key === "?" && !busy) { e.preventDefault(); setRemapOpen(!remapOpen); }
+      }
+    };
+    window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
+  }, [editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, getNode, selectedId, quickSibling, quickChild, nodes, startAddTask, stopAddTask, commitEditTask, commitBlock, promoteNode, demoteNode, keyBindings, remapOpen, remapTarget]);
+
+  const getCenter = useCallback((id) => { const n = nodes.find((x) => x.id === id); return n ? { x: n.x + 100, y: n.y + 28 } : { x: 0, y: 0 }; }, [nodes]);
+  const visIds = new Set(visibleNodes.map((n) => n.id));
+  const visCon = connections.filter((c) => visIds.has(c.from) && visIds.has(c.to));
+  const searchIds = new Set(searchResults.map((n) => n.id));
+  const bg = vc ? vc.tint : "#0a0a0b";
+  const gridC = vc ? vc.accent + "18" : "#151517";
+  const panelW = panelOpen ? 260 : 0;
+
+  const contextKeys = useMemo(() => {
+    if (remapOpen) return [{ label: "close settings", key: "esc" }];
+    if (searchOpen) return [{ label: "close", key: "esc" }];
+    if (editingId || taskInputNodeId || editingTaskId || editingBlockReason) {
+      const r = [{ label: "stop editing", key: "esc" }];
+      if (editingId) { r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) }); }
+      if (taskInputNodeId) r.push({ label: "add & continue", key: "enter" }, { label: "done adding", key: "empty enter" });
+      return r;
+    }
+    const r = [{ label: "new node", key: "dbl-click" }];
+    if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
+    if (viewParentId) r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) });
+    r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: "settings", key: "?" });
+    return r;
+  }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen]);
+
+  if (!loaded) return <div style={{ height: "100vh", background: "#0a0a0b", display: "flex", alignItems: "center", justifyContent: "center", color: "#525252", fontFamily: F, fontSize: 13 }}>loading...</div>;
+
+  const crumbs = getBreadcrumbs();
+
+  const renderTask = (task, nodeId, co) => {
+    const sm = SM[task.status]; const isET = editingTaskId === task.id; const isEB = editingBlockReason === task.id;
+    return (
+      <div key={task.id} style={{ padding: "2px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+          <button onClick={() => cycleTaskStatus(nodeId, task.id)} title={sm.label} style={{ background: "none", border: "none", color: sm.color, cursor: "pointer", fontSize: 10, padding: "0 2px", fontFamily: F, flexShrink: 0, lineHeight: 1 }}>{sm.icon}</button>
+          {isET ? <input ref={taskEditRef} value={editingTaskText} onChange={(e) => setEditingTaskText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitEditTask(nodeId); } if (e.key === "Escape") { setEditingTaskId(null); setEditingTaskText(""); } }} onBlur={() => commitEditTask(nodeId)} style={{ background: "none", border: "none", outline: "none", color: co.text + "b0", fontSize: 11, fontFamily: F, flex: 1, padding: 0 }} />
+          : <span onDoubleClick={(e) => { e.stopPropagation(); startEditTask(nodeId, task.id, task.text); }} style={{ color: task.status === "done" ? "#404040" : co.text + "b0", textDecoration: task.status === "done" ? "line-through" : "none", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}>{task.text}</span>}
+          <button onClick={() => deleteTask(nodeId, task.id)} style={{ background: "none", border: "none", color: "#ef444430", cursor: "pointer", fontSize: 10, padding: "0 2px" }} onMouseEnter={(e) => (e.target.style.color = "#ef4444")} onMouseLeave={(e) => (e.target.style.color = "#ef444430")}>×</button>
+        </div>
+        {task.status === "blocked" && <div style={{ marginLeft: 22, marginTop: 2 }}>{isEB ? <input ref={blockRef} value={blockReasonText} onChange={(e) => setBlockReasonText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitBlock(nodeId); } if (e.key === "Escape") { setEditingBlockReason(null); setBlockReasonText(""); } }} onBlur={() => commitBlock(nodeId)} placeholder="why blocked?" style={{ background: "none", border: "none", borderBottom: "1px solid #ef444430", outline: "none", color: "#ef444490", fontSize: 10, fontFamily: F, width: "100%", padding: "1px 0" }} /> : <span onClick={(e) => { e.stopPropagation(); startEditBlock(task.id, task.blockReason); }} style={{ color: task.blockReason ? "#ef444470" : "#ef444430", fontSize: 10, cursor: "pointer", fontStyle: task.blockReason ? "normal" : "italic" }}>{task.blockReason || "add block reason..."}</span>}</div>}
+        {task.status === "done" && task.completedAt && <div style={{ marginLeft: 22, color: "#333", fontSize: 9 }}>{fmtDate(task.completedAt)}</div>}
+      </div>
+    );
+  };
+
+  const PanelTaskItem = ({ task, node, path, showDate }) => (
+    <div onClick={() => navigateToNode(node.id)} style={{ padding: "6px 12px", cursor: "pointer", borderBottom: "1px solid #0f0f11" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#111113")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }}>
+        <span style={{ color: SM[task.status].color, fontSize: 10, flexShrink: 0 }}>{SM[task.status].icon}</span>
+        <span style={{ color: COLORS[node.colorIdx].text + (task.status === "done" ? "60" : "c0"), flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: task.status === "done" ? "line-through" : "none" }}>{task.text}</span>
+      </div>
+      {task.status === "blocked" && task.blockReason && <div style={{ color: "#ef444460", fontSize: 9, marginTop: 2, marginLeft: 17 }}>{task.blockReason}</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2, marginLeft: 17 }}>
+        <span style={{ color: "#404040", fontSize: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{path.map((p) => p.title || "?").join(" › ")}</span>
+        {showDate && task.completedAt && <span style={{ color: "#333", fontSize: 9, flexShrink: 0, marginLeft: 6 }}>{fmtDate(task.completedAt)}</span>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ height: "100vh", width: "100vw", background: bg, overflow: "hidden", position: "relative", fontFamily: F, cursor: isPanning ? "grabbing" : connectingFrom ? "crosshair" : "default", userSelect: "none", transition: "background 0.3s" }}>
+      {vc && <div style={{ position: "fixed", top: 40, left: panelW, right: 0, bottom: 0, boxShadow: `inset 0 0 80px ${vc.accent}12`, pointerEvents: "none", zIndex: 2, borderTop: `2px solid ${vc.accent}20` }} />}
+      {vpNode && <div style={{ position: "fixed", top: "50%", left: `calc(${panelW}px + 50%)`, transform: "translate(-50%,-50%)", fontSize: "clamp(48px,8vw,120px)", fontWeight: 800, color: vc.accent + "08", pointerEvents: "none", zIndex: 1, fontFamily: F }}>{vpNode.title || "untitled"}</div>}
+
+      {/* Panel */}
+      <div style={{ position: "fixed", top: 40, left: 0, bottom: 0, width: panelOpen ? 260 : 0, background: "#08080a", borderRight: panelOpen ? "1px solid #1a1a1c" : "none", zIndex: 99, overflow: "hidden", transition: "width 0.2s", display: "flex", flexDirection: "column" }}>
+        {panelOpen && <>
+          <div style={{ display: "flex", borderBottom: "1px solid #1a1a1c" }}>
+            {["ready", "done"].map((tab) => <button key={tab} onClick={() => setPanelTab(tab)} style={{ flex: 1, background: "none", border: "none", borderBottom: panelTab === tab ? "2px solid #525252" : "2px solid transparent", color: panelTab === tab ? "#e2e8f0" : "#404040", fontSize: 11, padding: "8px 0", cursor: "pointer", fontFamily: F, textTransform: "uppercase", letterSpacing: "0.05em" }}>{tab === "ready" ? `ready (${allReadyTasks.length})` : `done (${doneToday.length})`}</button>)}
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {panelTab === "ready" && <>
+              {allReadyTasks.length === 0 && <div style={{ color: "#333", fontSize: 11, padding: "12px" }}>no ready tasks</div>}
+              {allReadyTasks.map(({ task, node, path }) => <PanelTaskItem key={task.id} task={task} node={node} path={path} />)}
+              {allBlockedTasks.length > 0 && <><div style={{ padding: "10px 12px 4px", borderTop: "1px solid #1a1a1c", marginTop: 4 }}><span style={{ color: SM.blocked.color, fontSize: 11, fontWeight: 600, letterSpacing: "0.05em" }}>{SM.blocked.icon} BLOCKED ({allBlockedTasks.length})</span></div>{allBlockedTasks.map(({ task, node, path }) => <PanelTaskItem key={task.id} task={task} node={node} path={path} />)}</>}
+            </>}
+            {panelTab === "done" && <>
+              {doneToday.length === 0 && doneRecent.length === 0 && <div style={{ color: "#333", fontSize: 11, padding: "12px" }}>nothing completed yet</div>}
+              {doneToday.length > 0 && <><div style={{ padding: "10px 12px 4px" }}><span style={{ color: SM.ready.color, fontSize: 11, fontWeight: 600, letterSpacing: "0.05em" }}>✓ TODAY ({doneToday.length})</span></div>{doneToday.map(({ task, node, path }) => <PanelTaskItem key={task.id} task={task} node={node} path={path} showDate />)}</>}
+              {doneRecent.length > 0 && <><div style={{ padding: "10px 12px 4px", borderTop: doneToday.length > 0 ? "1px solid #1a1a1c" : "none", marginTop: doneToday.length > 0 ? 4 : 0 }}><span style={{ color: "#525252", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em" }}>RECENT (7 DAYS)</span></div>{doneRecent.map(({ task, node, path }) => <PanelTaskItem key={task.id} task={task} node={node} path={path} showDate />)}</>}
+            </>}
+          </div>
+        </>}
+      </div>
+      <button onClick={() => setPanelOpen(!panelOpen)} style={{ position: "fixed", top: 40, left: panelOpen ? 260 : 0, zIndex: 100, background: "#111113", border: "1px solid #1a1a1c", borderLeft: "none", borderTop: "none", color: "#525252", fontSize: 11, padding: "6px 5px", cursor: "pointer", borderRadius: "0 0 4px 0", fontFamily: F, transition: "left 0.2s" }}>{panelOpen ? "◂" : "▸"}</button>
+
+      {/* Top bar */}
+      <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 40, background: bg, borderBottom: `1px solid ${vc ? vc.accent + "20" : "#1a1a1c"}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", paddingLeft: panelW + 12, zIndex: 100, transition: "background 0.3s, padding-left 0.2s" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
+          {crumbs.map((cr, i) => { const cc = cr.colorIdx !== undefined ? COLORS[cr.colorIdx] : null; return (<div key={cr.id || "r"} style={{ display: "flex", alignItems: "center", gap: 4 }}>{i > 0 && <span style={{ color: "#333", fontSize: 10 }}>›</span>}<button onClick={() => { setViewParentId(cr.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: "none", border: "none", color: i === crumbs.length - 1 ? (cc?.text || "#e2e8f0") : "#525252", fontSize: 11, cursor: "pointer", padding: "2px 6px", borderRadius: 3, fontFamily: F, letterSpacing: i === 0 ? "0.1em" : 0, textTransform: i === 0 ? "uppercase" : "none", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onMouseEnter={(e) => (e.target.style.background = "#1a1a1c")} onMouseLeave={(e) => (e.target.style.background = "none")}>{cr.title || (i === 0 ? "root" : "untitled")}</button></div>); })}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {connectingFrom && <span style={{ color: "#f59e0b", fontSize: 11, marginRight: 4 }}>click to connect</span>}
+          {viewParentId && <button onClick={() => { const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: "none", border: `1px solid ${vc ? vc.accent + "30" : "#1a1a1c"}`, color: vc?.text || "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>← back</button>}
+          <button onClick={() => { setSearchOpen(!searchOpen); if (!searchOpen) setTimeout(() => searchRef.current?.focus(), 50); else setSearchQuery(""); }} style={{ background: "none", border: `1px solid ${searchOpen ? "#525252" : "#1a1a1c"}`, color: searchOpen ? "#e2e8f0" : "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>find</button>
+          <button onClick={() => setOffset({ x: 0, y: 0 })} style={{ background: "none", border: "1px solid #1a1a1c", color: "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>center</button>
+        </div>
+      </div>
+
+      {/* Search */}
+      {searchOpen && <div style={{ position: "fixed", top: 40, right: 12, zIndex: 101, background: "#111113", border: "1px solid #1a1a1c", borderTop: "none", borderRadius: "0 0 6px 6px", padding: 8, width: 320, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+        <input ref={searchRef} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="search..." style={{ background: "#0a0a0b", border: "1px solid #252528", borderRadius: 3, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: "6px 8px", width: "100%", outline: "none", boxSizing: "border-box" }} />
+        {searchQuery && <div style={{ marginTop: 6, maxHeight: 400, overflowY: "auto" }}>
+          {searchResults.length === 0 ? <div style={{ color: "#333", fontSize: 11, padding: 4 }}>no matches</div> : searchResults.map((n, idx) => { const anc = getAncestors(n.id); const ch = getChildren(n.id).slice(0, 3); const nc = COLORS[n.colorIdx]; return (<div key={n.id} onClick={() => { navigateToNode(n.id); setSearchOpen(false); setSearchQuery(""); }} style={{ padding: "8px 6px", cursor: "pointer", borderRadius: 4, borderBottom: idx < searchResults.length - 1 ? "1px solid #1a1a1c" : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#1a1a1c")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}><div style={{ fontSize: 11, lineHeight: "1.7" }}>{anc.map((a, i) => <div key={a.id} style={{ paddingLeft: i * 14, display: "flex", alignItems: "center", gap: 5, color: "#404040" }}><span style={{ color: COLORS[a.colorIdx].accent + "60", fontSize: 8 }}>●</span>{a.title || "untitled"}</div>)}<div style={{ paddingLeft: anc.length * 14, display: "flex", alignItems: "center", gap: 5, color: nc.text, fontWeight: 600 }}><span style={{ color: nc.accent, fontSize: 8 }}>●</span>{n.title || "untitled"}{readyCounts[n.id] > 0 && <span style={{ color: SM.ready.color, fontSize: 10, fontWeight: 400 }}>{readyCounts[n.id]} ready</span>}</div>{ch.map((c) => <div key={c.id} style={{ paddingLeft: (anc.length + 1) * 14, display: "flex", alignItems: "center", gap: 5, color: "#404040" }}><span style={{ color: COLORS[c.colorIdx].accent + "60", fontSize: 8 }}>●</span>{c.title || "untitled"}</div>)}</div></div>); })}
+        </div>}
+      </div>}
+
+      {/* Remap */}
+      {remapOpen && <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 200, background: "#111113", border: "1px solid #252528", borderRadius: 8, padding: 20, width: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}><span style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600 }}>key bindings</span><button onClick={() => setRemapOpen(false)} style={{ background: "none", border: "none", color: "#525252", cursor: "pointer", fontSize: 14 }}>×</button></div>
+        {Object.entries(keyBindings).map(([action, bind]) => <div key={action} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #1a1a1c" }}><span style={{ color: "#a0a0a0", fontSize: 11 }}>{bind.label}</span><button onClick={() => setRemapTarget(action)} style={{ background: remapTarget === action ? "#1e40af30" : "#1a1a1c", border: `1px solid ${remapTarget === action ? "#3b82f6" : "#252528"}`, color: remapTarget === action ? "#93c5fd" : "#e2e8f0", fontSize: 11, padding: "3px 10px", borderRadius: 3, cursor: "pointer", fontFamily: F, minWidth: 80, textAlign: "center" }}>{remapTarget === action ? "press key..." : fmtBind(bind)}</button></div>)}
+        <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between" }}><button onClick={() => setKeyBindings(DEFAULT_KEYS)} style={{ background: "none", border: "1px solid #1a1a1c", color: "#525252", fontSize: 10, padding: "4px 10px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>reset defaults</button><button onClick={() => setRemapOpen(false)} style={{ background: "#1e40af30", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 10, padding: "4px 10px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>done</button></div>
+      </div>}
+
+      {/* Empty */}
+      {visibleNodes.length === 0 && !vpNode && <div style={{ position: "fixed", top: "50%", left: `calc(${panelW}px + 50%)`, transform: "translate(-50%,-50%)", color: "#2a2a2c", fontSize: 13, textAlign: "center", lineHeight: "2.2", zIndex: 3, pointerEvents: "none" }}>double-click to place a node</div>}
+      {visibleNodes.length === 0 && vpNode && <div style={{ position: "fixed", top: "50%", left: `calc(${panelW}px + 50%)`, transform: "translate(-50%,-50%)", color: vc.accent + "30", fontSize: 13, textAlign: "center", zIndex: 3, pointerEvents: "none" }}>empty — double-click to add inside {vpNode.title || "this node"}</div>}
+
+      {/* Canvas */}
+      <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 40, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown}>
+        <div className="ci" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `radial-gradient(circle, ${gridC} 1px, transparent 1px)`, backgroundSize: "40px 40px", backgroundPosition: `${offset.x % 40}px ${offset.y % 40}px`, pointerEvents: "none" }} />
+        <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }}>
+          {visCon.map((c, i) => { const f = getCenter(c.from), t = getCenter(c.to); const lc = vc ? vc.accent + "30" : "#252528"; return (<g key={i}><line x1={f.x + offset.x} y1={f.y + offset.y} x2={t.x + offset.x} y2={t.y + offset.y} stroke={lc} strokeWidth="1.5" strokeDasharray="6,4" /><line x1={f.x + offset.x} y1={f.y + offset.y} x2={t.x + offset.x} y2={t.y + offset.y} stroke="transparent" strokeWidth="14" style={{ pointerEvents: "stroke", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); const o = visCon[i]; setConnections((p) => p.filter((x) => !(x.from === o.from && x.to === o.to))); }} onMouseEnter={(e) => { const s = e.target.previousSibling; if (s) s.setAttribute("stroke", "#ef4444"); }} onMouseLeave={(e) => { const s = e.target.previousSibling; if (s) s.setAttribute("stroke", lc); }} /></g>); })}
+        </svg>
+
+        {visibleNodes.map((node) => {
+          const co = COLORS[node.colorIdx]; const isSel = selectedId === node.id; const isEd = editingId === node.id;
+          const kids = childCount(node.id); const rc = readyCounts[node.id] || 0;
+          const tasks = node.tasks || []; const hasTasks = tasks.length > 0;
+          const isMatch = searchOpen && searchQuery && searchIds.has(node.id);
+          const isDim = searchOpen && searchQuery && !searchIds.has(node.id);
+          const isTA = taskInputNodeId === node.id;
+          const sorted = [...tasks.filter((t) => t.status === "ready"), ...tasks.filter((t) => t.status === "blocked"), ...tasks.filter((t) => t.status === "done")];
+          return (
+            <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
+              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `1px solid ${isMatch ? "#f59e0b" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: dragState?.id === node.id ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : dragState?.id === node.id ? "grabbing" : "grab" }}>
+              <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: node.collapsed ? "none" : `1px solid ${co.border}30`, minHeight: 34 }}>
+                {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
+                {rc > 0 && <span style={{ background: SM.ready.color + "20", border: `1px solid ${SM.ready.color}40`, color: SM.ready.color, fontSize: 10, borderRadius: 3, padding: "1px 5px", fontFamily: F, flexShrink: 0 }}>{rc}</span>}
+                {isEd && editingField === "title" ? <input ref={titleRef} value={node.title} onChange={(e) => updateNode(node.id, { title: e.target.value })} onKeyDown={(e) => fieldKey(e, node.id, "title")} onBlur={() => { setEditingId(null); setEditingField(null); }} placeholder="name..." style={{ background: "none", border: "none", outline: "none", color: co.text, fontSize: 13, fontFamily: F, fontWeight: 600, width: "100%", padding: 0 }} />
+                : <span style={{ color: node.title ? co.text : co.text + "30", fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.title || "untitled"}</span>}
+                {isSel && !(isEd && editingField === "title") && <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+                  <button onClick={(e) => { e.stopPropagation(); updateNode(node.id, { colorIdx: (node.colorIdx + 1) % COLORS.length }); }} style={{ background: "none", border: "none", color: co.text + "50", cursor: "pointer", fontSize: 14, padding: "2px 3px" }}>●</button>
+                  <button onClick={(e) => { e.stopPropagation(); setConnectingFrom(node.id); }} style={{ background: "none", border: "none", color: co.text + "50", cursor: "pointer", fontSize: 12, padding: "2px 3px" }}>◯</button>
+                  <button onClick={(e) => { e.stopPropagation(); updateNode(node.id, { collapsed: !node.collapsed }); }} style={{ background: "none", border: "none", color: co.text + "50", cursor: "pointer", fontSize: 12, padding: "2px 3px" }}>{node.collapsed ? "▸" : "▾"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteNode(node.id); }} style={{ background: "none", border: "none", color: "#ef444460", cursor: "pointer", fontSize: 12, padding: "2px 3px" }}>×</button>
+                </div>}
+              </div>
+              {!node.collapsed && <div style={{ padding: "8px 10px", minHeight: 20 }} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("notes"); setTimeout(() => notesRef.current?.focus(), 50); }}>
+                {isEd && editingField === "notes" ? <textarea ref={notesRef} value={node.notes} onChange={(e) => updateNode(node.id, { notes: e.target.value })} onKeyDown={(e) => fieldKey(e, node.id, "notes")} onBlur={() => { setEditingId(null); setEditingField(null); }} placeholder="notes..." rows={3} style={{ background: "none", border: "none", outline: "none", color: co.text + "b0", fontSize: 12, fontFamily: F, width: "100%", resize: "vertical", padding: 0, lineHeight: "1.6" }} />
+                : <div style={{ color: node.notes ? co.text + "80" : co.text + "20", fontSize: 12, lineHeight: "1.6", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{node.notes || "double-click for notes..."}</div>}
+              </div>}
+              {!node.collapsed && (hasTasks || isSel || isTA) && <div style={{ borderTop: `1px solid ${co.border}20`, padding: "6px 10px" }} onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                {sorted.map((t) => renderTask(t, node.id, co))}
+                {isTA && <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0" }}><span style={{ color: SM.ready.color, fontSize: 10, padding: "0 2px" }}>{SM.ready.icon}</span><input ref={taskAddRef} value={taskInputText} onChange={(e) => setTaskInputText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && taskInputText.trim()) { e.preventDefault(); addTask(node.id, taskInputText); setTaskInputText(""); } if (e.key === "Enter" && !taskInputText.trim()) { e.preventDefault(); stopAddTask(); } if (e.key === "Escape") stopAddTask(); }} placeholder="add task..." style={{ background: "none", border: "none", outline: "none", color: co.text + "b0", fontSize: 11, fontFamily: F, flex: 1, padding: 0 }} /></div>}
+                {!isTA && isSel && <button onClick={(e) => { e.stopPropagation(); startAddTask(node.id); }} style={{ background: "none", border: "none", color: co.text + "20", fontSize: 10, cursor: "pointer", padding: "3px 0", fontFamily: F }}>+ task</button>}
+              </div>}
+              {!node.collapsed && !isSel && !hasTasks && rc > 0 && <div style={{ borderTop: `1px solid ${co.border}15`, padding: "4px 10px" }}><span style={{ color: SM.ready.color + "50", fontSize: 10 }}>{rc} ready inside</span></div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      {legendVisible && <div style={{ position: "fixed", bottom: 10, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 100, pointerEvents: "none" }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", padding: "4px 12px", background: "#0a0a0bc0", borderRadius: 6, border: "1px solid #1a1a1c", pointerEvents: "auto" }}>
+          {contextKeys.map((k, i) => <span key={i} style={{ fontSize: 10, color: "#404040" }}><span style={{ color: "#606060", background: "#1a1a1c", padding: "1px 5px", borderRadius: 2, marginRight: 4, fontFamily: F }}>{k.key}</span>{k.label}</span>)}
+          <span onClick={() => setLegendVisible(false)} style={{ fontSize: 10, color: "#333", cursor: "pointer", marginLeft: 4 }}>×</span>
+        </div>
+      </div>}
+      {!legendVisible && <button onClick={() => setLegendVisible(true)} style={{ position: "fixed", bottom: 10, right: 10, background: "#111113", border: "1px solid #1a1a1c", color: "#404040", fontSize: 10, padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontFamily: F, zIndex: 100 }}>?</button>}
+    </div>
+  );
+}
+
+ReactDOM.render(<Workspace />, document.getElementById("root"));
+</script>
+</body>
+</html>
