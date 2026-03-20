@@ -78,8 +78,8 @@
 </style>
 </head>
 <body>
-<div id="site-nav" style="position:fixed;top:0;left:0;right:0;height:28px;background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding:0 12px;gap:4px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace"></div>
-<div id="app" style="padding-top:28px"></div>
+<div id="site-nav" style="position:fixed;top:0;left:0;right:0;height:40px;background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding:0 12px;gap:6px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace;overflow-x:auto;-webkit-overflow-scrolling:touch"></div>
+<div id="app" style="padding-top:40px"></div>
 <script>
 var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
 var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
@@ -102,11 +102,10 @@ function renderNav(){
     if(!canAccess(l.page))return;
     var isCur=l.page==="app";
     var el=document.createElement("a");el.href=l.href;el.textContent=l.label;
-    el.style.cssText="color:"+(isCur?"#f59e0b":"#555")+";font-size:11px;text-decoration:none;padding:4px 8px;border-radius:4px;font-family:var(--font);transition:color .15s";
-    el.onmouseenter=function(){if(!isCur)el.style.color="#888"};el.onmouseleave=function(){if(!isCur)el.style.color="#555"};
+    el.style.cssText="color:"+(isCur?"#f59e0b":"#666")+";font-size:13px;text-decoration:none;padding:8px 12px;border-radius:6px;font-family:var(--font);transition:color .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent";
     nav.appendChild(el);
   });
-  if(a){var out=document.createElement("button");out.textContent="sign out";out.style.cssText="color:#444;font-size:10px;background:none;border:none;cursor:pointer;padding:4px 8px;font-family:var(--font);margin-left:auto";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
+  if(a){var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
 var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="4.8.0";
@@ -268,6 +267,7 @@ function pushJobPublic(job){
     scheduled_date:job.scheduledDate||"",
     tasks_summary:tasks,
     notes_public:job.publicNotes||"",
+    photos:job.publicPhotos||[],
     updated_at:new Date().toISOString()
   };
   var url=SB_URL+"/rest/v1/job_public?token=eq."+job.shareToken;
@@ -1019,6 +1019,18 @@ function rJobView(){
     w.append(h("p",{style:{color:"#22d3ee",fontSize:"12px",marginTop:"8px"}},"Customer-visible notes"));
     w.append(h("p",{style:{color:"#555",fontSize:"11px"}},"Shown on the shared status page when you share a job link."));
     var pubTa=h("textarea",{rows:"6",placeholder:"Update for the customer...",style:{borderColor:"rgba(34,211,238,0.2)"},onInput:function(e){job.publicNotes=e.target.value;ss()}});pubTa.value=job.publicNotes||"";w.append(pubTa);
+    // Progress photos
+    w.append(h("p",{style:{color:"#22d3ee",fontSize:"12px",marginTop:"8px"}},"Progress Photos"));
+    if(!job.publicPhotos)job.publicPhotos=[];
+    var photoGrid=h("div",{class:"f g8 fw"});
+    job.publicPhotos.forEach(function(p,i){
+      var pw=h("div",{style:{position:"relative",flexShrink:0}});
+      pw.append(h("img",{class:"photo-thumb",src:p}));
+      var rm=h("button",{style:{position:"absolute",top:"-4px",right:"-4px",width:"18px",height:"18px",borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",fontSize:"10px",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"},onClick:function(){job.publicPhotos.splice(i,1);save();R()}});rm.textContent="\u00d7";pw.append(rm);
+      photoGrid.append(pw);
+    });
+    var addPhoto=h("div",{class:"photo-upload",onClick:function(){var inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=function(){if(inp.files[0]){compressImg(inp.files[0],600,function(b64){if(!job.publicPhotos)job.publicPhotos=[];job.publicPhotos.push(b64);save();R()})}};inp.click()}});addPhoto.innerHTML=I.cam;photoGrid.append(addPhoto);
+    w.append(photoGrid);
     if(job.shareToken)w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)",fontSize:"11px"},onClick:function(){pushJobPublic(job);flash("Status page updated")}},"Push update now"));
     w.append(h("span",{style:{color:"#555",fontSize:"11px"}},"Auto-saves"));root.append(w)}
 

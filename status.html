@@ -127,6 +127,27 @@ function render(job){
     noteW.appendChild(note);root.appendChild(noteW);
   }
 
+  // Photos
+  var photos=job.photos||[];
+  if(photos.length>0){
+    var photoSec=document.createElement("div");photoSec.className="section";
+    var plbl=document.createElement("span");plbl.className="section-label";plbl.textContent="Progress Photos ("+photos.length+")";photoSec.appendChild(plbl);
+    var pgrid=document.createElement("div");pgrid.style.cssText="display:flex;flex-wrap:wrap;gap:8px";
+    photos.forEach(function(src){
+      var img=document.createElement("img");
+      img.src=src;img.style.cssText="width:100%;max-width:200px;border-radius:8px;border:1px solid #333;cursor:pointer;object-fit:cover";
+      img.onclick=function(){
+        var overlay=document.createElement("div");
+        overlay.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px;cursor:pointer";
+        var big=document.createElement("img");big.src=src;big.style.cssText="max-width:100%;max-height:100%;border-radius:8px;object-fit:contain";
+        overlay.appendChild(big);overlay.onclick=function(){overlay.remove()};
+        document.body.appendChild(overlay);
+      };
+      pgrid.appendChild(img);
+    });
+    photoSec.appendChild(pgrid);root.appendChild(photoSec);
+  }
+
   // Updated
   if(job.updated_at){
     var meta=document.createElement("span");meta.className="meta";meta.style.textAlign="center";

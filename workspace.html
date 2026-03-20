@@ -23,7 +23,7 @@
 </style>
 </head>
 <body>
-<div id="site-nav" style="position:fixed;top:0;left:0;right:0;height:28px;background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding:0 12px;gap:4px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace"></div>
+<div id="site-nav" style="position:fixed;top:0;left:0;right:0;height:40px;background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding:0 8px;gap:4px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace;overflow-x:auto;-webkit-overflow-scrolling:touch"></div>
 <div id="root"></div>
 <script>
 // ============ AUTH + SYNC (plain JS, runs before React) ============
@@ -101,27 +101,23 @@ function renderNav(){
     if(!canAccess(l.page))return;
     var isCur=l.page==="workspace";
     var el=document.createElement("a");el.href=l.href;el.textContent=l.label;
-    el.style.cssText="color:"+(isCur?"#3b82f6":"#555")+";font-size:11px;text-decoration:none;padding:4px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;transition:color .15s";
-    el.onmouseenter=function(){if(!isCur)el.style.color="#888"};el.onmouseleave=function(){if(!isCur)el.style.color="#555"};
+    el.style.cssText="color:"+(isCur?"#3b82f6":"#666")+";font-size:13px;text-decoration:none;padding:8px 10px;border-radius:6px;font-family:'JetBrains Mono',monospace;white-space:nowrap;-webkit-tap-highlight-color:transparent;flex-shrink:0";
     nav.appendChild(el);
   });
-  // Notebook picker
-  var sep=document.createElement("span");sep.textContent="|";sep.style.cssText="color:#222;font-size:10px;margin:0 2px";nav.appendChild(sep);
+  var sep=document.createElement("span");sep.textContent="|";sep.style.cssText="color:#222;font-size:10px;margin:0 2px;flex-shrink:0";nav.appendChild(sep);
   var nbs=loadNotebooks();var activeId=getActiveNbId();
   nbs.forEach(function(nb){
     var btn=document.createElement("button");btn.textContent=nb.name;
     var isAct=nb.id===activeId;
-    btn.style.cssText="color:"+(isAct?nb.color:"#444")+";font-size:10px;background:"+(isAct?nb.color+"15":"none")+";border:"+(isAct?"1px solid "+nb.color+"40":"1px solid transparent")+";padding:2px 8px;border-radius:4px;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .15s";
+    btn.style.cssText="color:"+(isAct?nb.color:"#555")+";font-size:12px;background:"+(isAct?nb.color+"15":"none")+";border:"+(isAct?"1px solid "+nb.color+"40":"1px solid transparent")+";padding:6px 10px;border-radius:6px;cursor:pointer;font-family:'JetBrains Mono',monospace;white-space:nowrap;-webkit-tap-highlight-color:transparent;flex-shrink:0";
     btn.onclick=function(){if(!isAct){setActiveNbId(nb.id);wsStopPoll();_wsLastPush=0;_wsLocalDirty=0;window.location.reload()}};
     nav.appendChild(btn);
   });
-  // Add notebook button
   var addBtn=document.createElement("button");addBtn.textContent="+";
-  addBtn.style.cssText="color:#333;font-size:11px;background:none;border:none;cursor:pointer;padding:2px 6px;font-family:'JetBrains Mono',monospace";
+  addBtn.style.cssText="color:#444;font-size:14px;background:none;border:none;cursor:pointer;padding:6px 10px;font-family:'JetBrains Mono',monospace;-webkit-tap-highlight-color:transparent;flex-shrink:0";
   addBtn.onclick=function(){var name=prompt("Notebook name:");if(!name||!name.trim())return;var nbs2=loadNotebooks();var id=Math.random().toString(36).substr(2,6);var colors=["#64748b","#d97706","#22c55e","#3b82f6","#a855f7","#ea580c"];var color=colors[nbs2.length%colors.length];nbs2.push({id:id,name:name.trim(),color:color});saveNotebooks(nbs2);setActiveNbId(id);window.location.reload()};
   nav.appendChild(addBtn);
-  // Sign out
-  if(a){var out=document.createElement("button");out.textContent="sign out";out.style.cssText="color:#444;font-size:10px;background:none;border:none;cursor:pointer;padding:4px 8px;font-family:'JetBrains Mono',monospace;margin-left:auto";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
+  if(a){var out=document.createElement("button");out.textContent="\u00d7";out.title="Sign out";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 10px;font-family:'JetBrains Mono',monospace;margin-left:auto;-webkit-tap-highlight-color:transparent;flex-shrink:0";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 renderNav();
 
@@ -231,7 +227,7 @@ function Workspace() {
   const [editingTaskText, setEditingTaskText] = useState("");
   const [editingBlockReason, setEditingBlockReason] = useState(null);
   const [blockReasonText, setBlockReasonText] = useState("");
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(typeof window !== "undefined" && window.innerWidth >= 768);
   const [panelTab, setPanelTab] = useState("ready");
   const [keyBindings, setKeyBindings] = useState(DEFAULT_KEYS);
   const [remapOpen, setRemapOpen] = useState(false);
@@ -384,6 +380,53 @@ function Workspace() {
 
   useEffect(() => { const mv = (e) => { if (dragState) setNodes((p) => p.map((n) => n.id === dragState.id ? { ...n, x: dragState.ox + e.clientX - dragState.sx, y: dragState.oy + e.clientY - dragState.sy } : n)); if (isPanning && panStart) setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); }; const up = () => { setDragState(null); setIsPanning(false); setPanStart(null); }; window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up); return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); }; }, [dragState, isPanning, panStart]);
 
+  // Touch handlers
+  const touchRef = useRef({ dragging: null, panning: false, startX: 0, startY: 0, lastTap: 0 });
+  const handleCanvasTouchStart = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if (el === canvasRef.current || (el && el.classList.contains("ci"))) {
+      setSelectedId(null); setEditingId(null); setEditingField(null);
+      touchRef.current = { ...touchRef.current, panning: true, startX: t.clientX - offset.x, startY: t.clientY - offset.y };
+    }
+  }, [offset]);
+  const handleNodeTouchStart = useCallback((e, nid) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    const t = e.touches[0]; const now = Date.now();
+    const nd = nodes.find((n) => n.id === nid); if (!nd) return;
+    // Double-tap detection
+    if (now - touchRef.current.lastTap < 350 && selectedId === nid) {
+      setEditingId(nid); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50);
+      touchRef.current.lastTap = 0; return;
+    }
+    touchRef.current = { ...touchRef.current, lastTap: now, dragging: { id: nid, sx: t.clientX, sy: t.clientY, ox: nd.x, oy: nd.y, moved: false } };
+    setSelectedId(nid);
+  }, [nodes, selectedId]);
+  useEffect(() => {
+    const mv = (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0]; const tr = touchRef.current;
+      if (tr.dragging) {
+        const dx = t.clientX - tr.dragging.sx, dy = t.clientY - tr.dragging.sy;
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5 || tr.dragging.moved) {
+          tr.dragging.moved = true; e.preventDefault();
+          setNodes((p) => p.map((n) => n.id === tr.dragging.id ? { ...n, x: tr.dragging.ox + dx, y: tr.dragging.oy + dy } : n));
+        }
+      } else if (tr.panning) {
+        e.preventDefault();
+        setOffset({ x: t.clientX - tr.startX, y: t.clientY - tr.startY });
+      }
+    };
+    const up = () => { touchRef.current = { ...touchRef.current, dragging: null, panning: false }; };
+    window.addEventListener("touchmove", mv, { passive: false }); window.addEventListener("touchend", up); window.addEventListener("touchcancel", up);
+    return () => { window.removeEventListener("touchmove", mv); window.removeEventListener("touchend", up); window.removeEventListener("touchcancel", up); };
+  }, []);
+
+  // Mobile detection
+  const isMobile = typeof window !== "undefined" && (("ontouchstart" in window) || window.innerWidth < 768);
+
   const fieldKey = useCallback((e, nid, field) => {
     const kids = childCount(nid);
     if (matchBind(e, keyBindings.goUp)) { e.preventDefault(); setEditingId(null); setEditingField(null); if (viewParentId) { const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); } }
@@ -480,11 +523,11 @@ function Workspace() {
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: bg, overflow: "hidden", position: "relative", fontFamily: F, cursor: isPanning ? "grabbing" : connectingFrom ? "crosshair" : "default", userSelect: "none", transition: "background 0.3s" }}>
-      {vc && <div style={{ position: "fixed", top: 68, left: panelW, right: 0, bottom: 0, boxShadow: `inset 0 0 80px ${vc.accent}12`, pointerEvents: "none", zIndex: 2, borderTop: `2px solid ${vc.accent}20` }} />}
+      {vc && <div style={{ position: "fixed", top: 80, left: panelW, right: 0, bottom: 0, boxShadow: `inset 0 0 80px ${vc.accent}12`, pointerEvents: "none", zIndex: 2, borderTop: `2px solid ${vc.accent}20` }} />}
       {vpNode && <div style={{ position: "fixed", top: "50%", left: `calc(${panelW}px + 50%)`, transform: "translate(-50%,-50%)", fontSize: "clamp(48px,8vw,120px)", fontWeight: 800, color: vc.accent + "08", pointerEvents: "none", zIndex: 1, fontFamily: F }}>{vpNode.title || "untitled"}</div>}
 
       {/* Panel */}
-      <div style={{ position: "fixed", top: 68, left: 0, bottom: 0, width: panelOpen ? 260 : 0, background: "#08080a", borderRight: panelOpen ? "1px solid #1a1a1c" : "none", zIndex: 99, overflow: "hidden", transition: "width 0.2s", display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "fixed", top: 80, left: 0, bottom: 0, width: panelOpen ? 260 : 0, background: "#08080a", borderRight: panelOpen ? "1px solid #1a1a1c" : "none", zIndex: 99, overflow: "hidden", transition: "width 0.2s", display: "flex", flexDirection: "column" }}>
         {panelOpen && <>
           <div style={{ display: "flex", borderBottom: "1px solid #1a1a1c" }}>
             {["ready", "done"].map((tab) => <button key={tab} onClick={() => setPanelTab(tab)} style={{ flex: 1, background: "none", border: "none", borderBottom: panelTab === tab ? "2px solid #525252" : "2px solid transparent", color: panelTab === tab ? "#e2e8f0" : "#404040", fontSize: 11, padding: "8px 0", cursor: "pointer", fontFamily: F, textTransform: "uppercase", letterSpacing: "0.05em" }}>{tab === "ready" ? `ready (${allReadyTasks.length})` : `done (${doneToday.length})`}</button>)}
@@ -503,10 +546,10 @@ function Workspace() {
           </div>
         </>}
       </div>
-      <button onClick={() => setPanelOpen(!panelOpen)} style={{ position: "fixed", top: 68, left: panelOpen ? 260 : 0, zIndex: 100, background: "#111113", border: "1px solid #1a1a1c", borderLeft: "none", borderTop: "none", color: "#525252", fontSize: 11, padding: "6px 5px", cursor: "pointer", borderRadius: "0 0 4px 0", fontFamily: F, transition: "left 0.2s" }}>{panelOpen ? "◂" : "▸"}</button>
+      <button onClick={() => setPanelOpen(!panelOpen)} style={{ position: "fixed", top: 80, left: panelOpen ? 260 : 0, zIndex: 100, background: "#111113", border: "1px solid #1a1a1c", borderLeft: "none", borderTop: "none", color: "#525252", fontSize: 11, padding: "6px 5px", cursor: "pointer", borderRadius: "0 0 4px 0", fontFamily: F, transition: "left 0.2s" }}>{panelOpen ? "◂" : "▸"}</button>
 
       {/* Top bar */}
-      <div style={{ position: "fixed", top: 28, left: 0, right: 0, height: 40, background: bg, borderBottom: `1px solid ${vc ? vc.accent + "20" : "#1a1a1c"}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", paddingLeft: panelW + 12, zIndex: 100, transition: "background 0.3s, padding-left 0.2s" }}>
+      <div style={{ position: "fixed", top: 40, left: 0, right: 0, height: 40, background: bg, borderBottom: `1px solid ${vc ? vc.accent + "20" : "#1a1a1c"}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", paddingLeft: panelW + 12, zIndex: 100, transition: "background 0.3s, padding-left 0.2s" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
           {crumbs.map((cr, i) => { const cc = cr.colorIdx !== undefined ? COLORS[cr.colorIdx] : null; return (<div key={cr.id || "r"} style={{ display: "flex", alignItems: "center", gap: 4 }}>{i > 0 && <span style={{ color: "#333", fontSize: 10 }}>›</span>}<button onClick={() => { setViewParentId(cr.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: "none", border: "none", color: i === crumbs.length - 1 ? (cc?.text || "#e2e8f0") : "#525252", fontSize: 11, cursor: "pointer", padding: "2px 6px", borderRadius: 3, fontFamily: F, letterSpacing: i === 0 ? "0.1em" : 0, textTransform: i === 0 ? "uppercase" : "none", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onMouseEnter={(e) => (e.target.style.background = "#1a1a1c")} onMouseLeave={(e) => (e.target.style.background = "none")}>{cr.title || (i === 0 ? "root" : "untitled")}</button></div>); })}
         </div>
@@ -519,7 +562,7 @@ function Workspace() {
       </div>
 
       {/* Search */}
-      {searchOpen && <div style={{ position: "fixed", top: 68, right: 12, zIndex: 101, background: "#111113", border: "1px solid #1a1a1c", borderTop: "none", borderRadius: "0 0 6px 6px", padding: 8, width: 320, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+      {searchOpen && <div style={{ position: "fixed", top: 80, right: 12, zIndex: 101, background: "#111113", border: "1px solid #1a1a1c", borderTop: "none", borderRadius: "0 0 6px 6px", padding: 8, width: 320, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
         <input ref={searchRef} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="search..." style={{ background: "#0a0a0b", border: "1px solid #252528", borderRadius: 3, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: "6px 8px", width: "100%", outline: "none", boxSizing: "border-box" }} />
         {searchQuery && <div style={{ marginTop: 6, maxHeight: 400, overflowY: "auto" }}>
           {searchResults.length === 0 ? <div style={{ color: "#333", fontSize: 11, padding: 4 }}>no matches</div> : searchResults.map((n, idx) => { const anc = getAncestors(n.id); const ch = getChildren(n.id).slice(0, 3); const nc = COLORS[n.colorIdx]; return (<div key={n.id} onClick={() => { navigateToNode(n.id); setSearchOpen(false); setSearchQuery(""); }} style={{ padding: "8px 6px", cursor: "pointer", borderRadius: 4, borderBottom: idx < searchResults.length - 1 ? "1px solid #1a1a1c" : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#1a1a1c")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}><div style={{ fontSize: 11, lineHeight: "1.7" }}>{anc.map((a, i) => <div key={a.id} style={{ paddingLeft: i * 14, display: "flex", alignItems: "center", gap: 5, color: "#404040" }}><span style={{ color: COLORS[a.colorIdx].accent + "60", fontSize: 8 }}>●</span>{a.title || "untitled"}</div>)}<div style={{ paddingLeft: anc.length * 14, display: "flex", alignItems: "center", gap: 5, color: nc.text, fontWeight: 600 }}><span style={{ color: nc.accent, fontSize: 8 }}>●</span>{n.title || "untitled"}{readyCounts[n.id] > 0 && <span style={{ color: SM.ready.color, fontSize: 10, fontWeight: 400 }}>{readyCounts[n.id]} ready</span>}</div>{ch.map((c) => <div key={c.id} style={{ paddingLeft: (anc.length + 1) * 14, display: "flex", alignItems: "center", gap: 5, color: "#404040" }}><span style={{ color: COLORS[c.colorIdx].accent + "60", fontSize: 8 }}>●</span>{c.title || "untitled"}</div>)}</div></div>); })}
@@ -538,7 +581,7 @@ function Workspace() {
       {visibleNodes.length === 0 && vpNode && <div style={{ position: "fixed", top: "50%", left: `calc(${panelW}px + 50%)`, transform: "translate(-50%,-50%)", color: vc.accent + "30", fontSize: 13, textAlign: "center", zIndex: 3, pointerEvents: "none" }}>empty — double-click to add inside {vpNode.title || "this node"}</div>}
 
       {/* Canvas */}
-      <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 68, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown}>
+      <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 80, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s", touchAction: "none" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown} onTouchStart={handleCanvasTouchStart}>
         <div className="ci" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `radial-gradient(circle, ${gridC} 1px, transparent 1px)`, backgroundSize: "40px 40px", backgroundPosition: `${offset.x % 40}px ${offset.y % 40}px`, pointerEvents: "none" }} />
         <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }}>
           {visCon.map((c, i) => { const f = getCenter(c.from), t = getCenter(c.to); const lc = vc ? vc.accent + "30" : "#252528"; return (<g key={i}><line x1={f.x + offset.x} y1={f.y + offset.y} x2={t.x + offset.x} y2={t.y + offset.y} stroke={lc} strokeWidth="1.5" strokeDasharray="6,4" /><line x1={f.x + offset.x} y1={f.y + offset.y} x2={t.x + offset.x} y2={t.y + offset.y} stroke="transparent" strokeWidth="14" style={{ pointerEvents: "stroke", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); const o = visCon[i]; setConnections((p) => p.filter((x) => !(x.from === o.from && x.to === o.to))); }} onMouseEnter={(e) => { const s = e.target.previousSibling; if (s) s.setAttribute("stroke", "#ef4444"); }} onMouseLeave={(e) => { const s = e.target.previousSibling; if (s) s.setAttribute("stroke", lc); }} /></g>); })}
@@ -553,7 +596,7 @@ function Workspace() {
           const isTA = taskInputNodeId === node.id;
           const sorted = [...tasks.filter((t) => t.status === "ready"), ...tasks.filter((t) => t.status === "blocked"), ...tasks.filter((t) => t.status === "done")];
           return (
-            <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
+            <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onTouchStart={(e) => handleNodeTouchStart(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
               style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `1px solid ${isMatch ? "#f59e0b" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: dragState?.id === node.id ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : dragState?.id === node.id ? "grabbing" : "grab" }}>
               <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: node.collapsed ? "none" : `1px solid ${co.border}30`, minHeight: 34 }}>
                 {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
@@ -631,7 +674,7 @@ function Workspace() {
 
       {/* Intention in top bar */}
       {dailyIntention && intentionDate === todayStr && !focusNodeId && (
-        <div style={{ position: "fixed", top: 68, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 99, pointerEvents: "none" }}>
+        <div style={{ position: "fixed", top: 80, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 99, pointerEvents: "none" }}>
           <div style={{ background: "#0a0a0bc0", border: "1px solid #f59e0b20", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "4px 16px", pointerEvents: "auto" }}>
             <span style={{ color: "#f59e0b80", fontSize: 11 }}>{dailyIntention}</span>
           </div>
@@ -651,6 +694,20 @@ function Workspace() {
       {!focusNodeId && (todayDoneCount > 0 || todayFocusMins > 0) && (
         <div style={{ position: "fixed", bottom: 0, left: panelW, right: 0, height: 6, background: "#111113", zIndex: 101, transition: "left 0.2s" }}>
           <div style={{ height: "100%", width: momentumPct + "%", background: "linear-gradient(90deg, #22c55e40, #22c55e)", borderRadius: "0 3px 3px 0", transition: "width 0.5s ease" }} />
+        </div>
+      )}
+
+      {/* Mobile action bar */}
+      {isMobile && !focusNodeId && !editingId && !remapOpen && !showIntentionPrompt && (
+        <div style={{ position: "fixed", bottom: 20, right: 16, zIndex: 200, display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+          {selectedId && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {nodes.filter((n) => n.parentId === selectedId).length > 0 && <button onClick={() => { setViewParentId(selectedId); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ width: 44, height: 44, borderRadius: 22, background: "#1e40af50", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 14, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>↓</button>}
+              <button onClick={() => enterFocus(selectedId)} style={{ width: 44, height: 44, borderRadius: 22, background: "#22c55e20", border: "1px solid #22c55e40", color: "#22c55e", fontSize: 18, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>◎</button>
+              <button onClick={() => quickChild(selectedId)} style={{ width: 44, height: 44, borderRadius: 22, background: "#a855f720", border: "1px solid #a855f740", color: "#a855f7", fontSize: 18, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>⤵</button>
+            </div>
+          )}
+          <button onClick={() => { if (!canvasRef.current) return; const r = canvasRef.current.getBoundingClientRect(); const pn = viewParentId ? getNode(viewParentId) : null; addNode(viewParentId, r.width / 2 - offset.x - 90, r.height / 2 - offset.y - 20, pn?.colorIdx || 0); }} style={{ width: 52, height: 52, borderRadius: 26, background: "#f59e0b", border: "none", color: "#000", fontSize: 24, fontWeight: 700, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(245,158,11,0.3)" }}>+</button>
         </div>
       )}
     </div>
