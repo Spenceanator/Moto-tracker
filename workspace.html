@@ -710,7 +710,7 @@ function Workspace() {
                   const newCons = (decomposeNodes.reduce((acc, dn) => { if (dn._connections) dn._connections.forEach((c) => { if (idMap[c.to] !== undefined) acc.push({ from: idMap[dn._tmpId], to: idMap[c.to], label: c.label || "" }); }); return acc; }, []));
                   if (newCons.length > 0) setConnections((p) => [...p, ...newCons]);
                   setDecomposeOpen(false);
-                }} style={{ background: "#f59e0b20", border: "1px solid #f59e0b40", color: "#f59e0b", fontSize: 11, padding: "6px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>place {decomposeNodes.length} nodes</button>}
+                }} style={{ background: "#f59e0b20", border: "1px solid #f59e0b40", color: "#f59e0b", fontSize: 11, padding: "6px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>place {decomposeNodes.length} nodes on canvas</button>}
                 <button onClick={() => setDecomposeOpen(false)} style={{ background: "none", border: "1px solid #252528", color: "#525252", fontSize: 11, padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>cancel (esc)</button>
               </div>
             </div>
@@ -719,32 +719,40 @@ function Workspace() {
             {decomposeMode === "manual" && (
               <div style={{ flex: 1, display: "flex", gap: 16, overflow: "hidden" }}>
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <span style={{ color: "#525252", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>paste ticket / doc</span>
-                  <textarea ref={decomposeRef} value={decomposeText} onChange={(e) => setDecomposeText(e.target.value)} placeholder="Paste your ticket, design doc, or describe the feature..." style={{ flex: 1, background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: 12, resize: "none", outline: "none", lineHeight: "1.6" }} />
-                  <button onClick={() => {
-                    const sel = window.getSelection().toString().trim();
-                    if (!sel) return;
-                    const tmpId = decomposeNodes.length;
-                    setDecomposeNodes((p) => [...p, { _tmpId: tmpId, title: "", notes: sel, colorIdx: 0, tasks: [], x: 60 + (tmpId % 3) * 240, y: 60 + Math.floor(tmpId / 3) * 160, _connections: [] }]);
-                  }} style={{ background: "#1e40af20", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 11, padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F, alignSelf: "flex-start" }}>selection → node</button>
+                  <span style={{ color: "#3b82f6", fontSize: 11, fontWeight: 600 }}>① Paste your ticket or doc</span>
+                  <textarea ref={decomposeRef} value={decomposeText} onChange={(e) => setDecomposeText(e.target.value)} placeholder={"Paste the full ticket, design doc, or feature description here.\n\nThen:\n1. Highlight a section that represents one component\n2. Click the blue button below\n3. It becomes a node on the right\n4. Repeat until decomposed"} style={{ flex: 1, background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: 12, resize: "none", outline: "none", lineHeight: "1.6" }} />
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button onClick={() => {
+                      const sel = window.getSelection().toString().trim();
+                      if (!sel) { const btn = document.getElementById("sel-btn"); if (btn) { btn.style.borderColor = "#ef444460"; btn.style.color = "#ef4444"; setTimeout(() => { btn.style.borderColor = "#3b82f640"; btn.style.color = "#93c5fd"; }, 800); } return; }
+                      const tmpId = decomposeNodes.length;
+                      setDecomposeNodes((p) => [...p, { _tmpId: tmpId, title: "", notes: sel, colorIdx: 0, tasks: [], x: 60 + (tmpId % 3) * 240, y: 60 + Math.floor(tmpId / 3) * 160, _connections: [] }]);
+                    }} id="sel-btn" style={{ background: "#1e40af20", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 11, padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F, transition: "all .2s" }}>② selection → node</button>
+                    <span style={{ color: "#333", fontSize: 10 }}>highlight text first</span>
+                    <button onClick={() => { const tmpId = decomposeNodes.length; setDecomposeNodes((p) => [...p, { _tmpId: tmpId, title: "", notes: "", colorIdx: 0, tasks: [], x: 60 + (tmpId % 3) * 240, y: 60 + Math.floor(tmpId / 3) * 160, _connections: [] }]); }} style={{ background: "#252528", border: "1px solid #333", color: "#888", fontSize: 11, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F, marginLeft: "auto" }}>+ blank</button>
+                  </div>
                 </div>
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, overflow: "hidden" }}>
-                  <span style={{ color: "#525252", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>nodes ({decomposeNodes.length})</span>
+                  <span style={{ color: decomposeNodes.length > 0 ? "#22c55e" : "#525252", fontSize: 11, fontWeight: 600 }}>③ {decomposeNodes.length > 0 ? `Name & add tasks → then place (${decomposeNodes.length})` : "Components appear here"}</span>
                   <div style={{ flex: 1, overflowY: "auto" }}>
                     {decomposeNodes.map((dn, i) => (
                       <div key={i} style={{ padding: "10px 12px", background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, marginBottom: 8 }}>
-                        <input value={dn.title} onChange={(e) => { const v = e.target.value; setDecomposeNodes((p) => p.map((n, ni) => ni === i ? { ...n, title: v } : n)); }} placeholder="Node title..." style={{ background: "none", border: "none", outline: "none", color: "#e2e8f0", fontSize: 13, fontFamily: F, fontWeight: 600, width: "100%", padding: 0, marginBottom: 4 }} />
-                        <div style={{ color: "#888", fontSize: 10, lineHeight: "1.5", maxHeight: 60, overflow: "hidden" }}>{dn.notes.slice(0, 200)}{dn.notes.length > 200 ? "..." : ""}</div>
-                        <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
-                          {(dn.tasks || []).map((t, ti) => <span key={ti} style={{ background: "#22c55e15", border: "1px solid #22c55e30", color: "#22c55e", fontSize: 9, padding: "1px 6px", borderRadius: 3 }}>{typeof t === "string" ? t : t.text}</span>)}
-                          <button onClick={() => { const text = prompt("Task:"); if (text && text.trim()) setDecomposeNodes((p) => p.map((n, ni) => ni === i ? { ...n, tasks: [...(n.tasks || []), { text: text.trim(), status: "ready", blockReason: "" }] } : n)); }} style={{ background: "none", border: "1px dashed #333", color: "#444", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>+ task</button>
+                        <input value={dn.title} onChange={(e) => { const v = e.target.value; setDecomposeNodes((p) => p.map((n, ni) => ni === i ? { ...n, title: v } : n)); }} placeholder="Name this component..." autoFocus={i === decomposeNodes.length - 1} style={{ background: "none", border: "none", borderBottom: "1px solid #252528", outline: "none", color: "#e2e8f0", fontSize: 13, fontFamily: F, fontWeight: 600, width: "100%", padding: "0 0 4px", marginBottom: 4 }} />
+                        {dn.notes && <div style={{ color: "#888", fontSize: 10, lineHeight: "1.5", maxHeight: 60, overflow: "hidden", marginBottom: 4, borderLeft: "2px solid #252528", paddingLeft: 8 }}>{dn.notes.slice(0, 200)}{dn.notes.length > 200 ? "..." : ""}</div>}
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                          {(dn.tasks || []).map((t, ti) => <span key={ti} style={{ background: "#22c55e15", border: "1px solid #22c55e30", color: "#22c55e", fontSize: 9, padding: "2px 6px", borderRadius: 3 }}>{typeof t === "string" ? t : t.text}</span>)}
+                          <button onClick={() => { const text = prompt("What needs to happen here?"); if (text && text.trim()) setDecomposeNodes((p) => p.map((n, ni) => ni === i ? { ...n, tasks: [...(n.tasks || []), { text: text.trim(), status: "ready", blockReason: "" }] } : n)); }} style={{ background: "none", border: "1px dashed #333", color: "#444", fontSize: 9, padding: "2px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>+ task</button>
+                          <button onClick={() => setDecomposeNodes((p) => p.filter((_, ni) => ni !== i))} style={{ background: "none", border: "none", color: "#ef444430", fontSize: 10, cursor: "pointer", padding: "2px 4px", fontFamily: F, marginLeft: "auto" }}>×</button>
                         </div>
-                        <button onClick={() => setDecomposeNodes((p) => p.filter((_, ni) => ni !== i))} style={{ background: "none", border: "none", color: "#ef444440", fontSize: 10, cursor: "pointer", padding: "4px 0", fontFamily: F, marginTop: 4 }}>remove</button>
                       </div>
                     ))}
-                    {decomposeNodes.length === 0 && <div style={{ color: "#333", fontSize: 11, padding: 12, textAlign: "center" }}>Select text on the left and click "selection → node" to pull pieces out</div>}
+                    {decomposeNodes.length === 0 && <div style={{ color: "#333", fontSize: 12, padding: "40px 20px", textAlign: "center", lineHeight: "2.2" }}>
+                      <div style={{ color: "#525252", marginBottom: 8 }}>No components yet</div>
+                      Highlight text on the left → click "selection → node"<br/>
+                      Each piece becomes a component on your canvas<br/>
+                      Name them, add tasks, then hit <span style={{ color: "#f59e0b" }}>place</span>
+                    </div>}
                   </div>
-                  <button onClick={() => { const tmpId = decomposeNodes.length; setDecomposeNodes((p) => [...p, { _tmpId: tmpId, title: "", notes: "", colorIdx: 0, tasks: [], x: 60 + (tmpId % 3) * 240, y: 60 + Math.floor(tmpId / 3) * 160, _connections: [] }]); }} style={{ background: "#252528", border: "1px solid #333", color: "#888", fontSize: 11, padding: "8px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>+ empty node</button>
                 </div>
               </div>
             )}
@@ -754,8 +762,10 @@ function Workspace() {
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, overflow: "hidden" }}>
                 {decomposeChat.length === 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <textarea ref={decomposeRef} value={decomposeText} onChange={(e) => setDecomposeText(e.target.value)} placeholder="Paste the ticket, design doc, or describe what you're building..." rows={6} style={{ background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: 12, resize: "vertical", outline: "none", lineHeight: "1.6" }} />
-                    <input value={decomposeContext} onChange={(e) => setDecomposeContext(e.target.value)} placeholder="What do you already understand? (optional)" style={{ background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#888", fontSize: 11, fontFamily: F, padding: "8px 12px", outline: "none" }} />
+                    <span style={{ color: "#525252", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>① paste the ticket or describe the feature</span>
+                    <textarea ref={decomposeRef} value={decomposeText} onChange={(e) => setDecomposeText(e.target.value)} placeholder="Paste the full ticket, design doc, or describe what you're building. Claude will propose a systems schematic — components, data flow, dependencies — not a task list." rows={6} style={{ background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: 12, resize: "vertical", outline: "none", lineHeight: "1.6" }} />
+                    <span style={{ color: "#525252", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>② what do you already know? (optional)</span>
+                    <input value={decomposeContext} onChange={(e) => setDecomposeContext(e.target.value)} placeholder="Skip what you understand so Claude focuses on what's fuzzy..." style={{ background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#888", fontSize: 11, fontFamily: F, padding: "8px 12px", outline: "none" }} />
                   </div>
                 )}
                 <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -808,15 +818,15 @@ First task on the first component should be the smallest possible physical actio
                   return (
                     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                       {decomposeChat.length === 0 ? (
-                        <button onClick={() => { if (!decomposeText.trim()) return; const msg = decomposeText + (decomposeContext ? "\n\nContext I already have: " + decomposeContext : ""); sendToApi(msg); }} disabled={!hasKey || !decomposeText.trim() || decomposeLoading} style={{ flex: 1, background: hasKey ? "#a855f720" : "#1a1a1c", border: "1px solid " + (hasKey ? "#a855f740" : "#252528"), color: hasKey ? "#a855f7" : "#333", fontSize: 11, padding: "10px", borderRadius: 4, cursor: hasKey ? "pointer" : "default", fontFamily: F, opacity: (!hasKey || !decomposeText.trim()) ? 0.4 : 1 }}>{hasKey ? "send to claude" : "add API key in Drydock settings"}</button>
+                        <button onClick={() => { if (!decomposeText.trim()) return; const msg = decomposeText + (decomposeContext ? "\n\nContext I already have: " + decomposeContext : ""); sendToApi(msg); }} disabled={!hasKey || !decomposeText.trim() || decomposeLoading} style={{ flex: 1, background: hasKey ? "#a855f720" : "#1a1a1c", border: "1px solid " + (hasKey ? "#a855f740" : "#252528"), color: hasKey ? "#a855f7" : "#333", fontSize: 11, padding: "10px", borderRadius: 4, cursor: hasKey ? "pointer" : "default", fontFamily: F, opacity: (!hasKey || !decomposeText.trim()) ? 0.4 : 1 }}>{hasKey ? "③ send to claude — build the schematic" : "needs API key (add in Drydock settings)"}</button>
                       ) : (
-                        <input id="decompose-followup" placeholder="Ask a question or say 'place' to generate nodes..." onKeyDown={(e) => { if (e.key === "Enter" && e.target.value.trim()) { sendToApi(e.target.value.trim()); e.target.value = ""; } }} style={{ flex: 1, background: "#111113", border: "1px solid #1a1a1c", borderRadius: 4, color: "#e2e8f0", fontSize: 11, fontFamily: F, padding: "8px 12px", outline: "none" }} />
+                        <input id="decompose-followup" placeholder="Refine the schematic... or type 'place' to generate nodes" onKeyDown={(e) => { if (e.key === "Enter" && e.target.value.trim()) { sendToApi(e.target.value.trim()); e.target.value = ""; } }} style={{ flex: 1, background: "#111113", border: "1px solid #1a1a1c", borderRadius: 4, color: "#e2e8f0", fontSize: 11, fontFamily: F, padding: "8px 12px", outline: "none" }} />
                       )}
                     </div>
                   );
                 })()}
                 {decomposeNodes.length > 0 && <div style={{ flexShrink: 0, padding: "8px 0", borderTop: "1px solid #1a1a1c" }}>
-                  <span style={{ color: "#22c55e", fontSize: 11 }}>{decomposeNodes.length} nodes ready to place</span>
+                  <span style={{ color: "#22c55e", fontSize: 11 }}>Schematic ready — {decomposeNodes.length} components. Hit "place" in the top right to drop them on your canvas.</span>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>{decomposeNodes.map((dn, i) => <span key={i} style={{ background: "#22c55e10", border: "1px solid #22c55e30", color: "#22c55e", fontSize: 10, padding: "2px 8px", borderRadius: 3 }}>{dn.title || "untitled"}</span>)}</div>
                 </div>}
               </div>
