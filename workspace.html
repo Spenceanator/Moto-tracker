@@ -196,6 +196,7 @@ const DEFAULT_KEYS = {
   demote: { key: "]", mod: "", label: "demote node" },
   find: { key: "f", mod: "meta", label: "search" },
   drillIn: { key: "Enter", mod: "", label: "drill into node" },
+  focus: { key: ".", mod: "", label: "focus mode" },
 };
 
 const modLabel = (mod) => { if (!mod) return ""; if (mod === "meta") return navigator.platform?.includes("Mac") ? "⌘+" : "ctrl+"; if (mod === "shift") return "shift+"; return mod + "+"; };
@@ -236,6 +237,15 @@ function Workspace() {
   const [remapOpen, setRemapOpen] = useState(false);
   const [remapTarget, setRemapTarget] = useState(null);
   const [legendVisible, setLegendVisible] = useState(true);
+  const [focusNodeId, setFocusNodeId] = useState(null);
+  const [focusStart, setFocusStart] = useState(null);
+  const [focusMicroStep, setFocusMicroStep] = useState("");
+  const [focusExitNote, setFocusExitNote] = useState("");
+  const [focusElapsed, setFocusElapsed] = useState(0);
+  const [focusSessions, setFocusSessions] = useState([]);
+  const [dailyIntention, setDailyIntention] = useState("");
+  const [intentionDate, setIntentionDate] = useState("");
+  const [showIntentionPrompt, setShowIntentionPrompt] = useState(false);
 
   const canvasRef = useRef(null);
   const titleRef = useRef(null);
@@ -244,21 +254,30 @@ function Workspace() {
   const taskAddRef = useRef(null);
   const taskEditRef = useRef(null);
   const blockRef = useRef(null);
+  const microRef = useRef(null);
+  const intentionRef = useRef(null);
+  const exitNoteRef = useRef(null);
 
   // Load
   useEffect(() => {
-    // Try cloud first, fall back to local
     wsSyncPull(function(remote) {
       var data = remote || loadJSON(STORE, null);
       if (data && data.nodes) {
-        setNodes(data.nodes.map((n) => ({ ...n, tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
+        setNodes(data.nodes.map((n) => ({ ...n, sessions: n.sessions || [], tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
         setConnections(data.connections || []);
+        if (data.focusSessions) setFocusSessions(data.focusSessions);
+        if (data.intention) { setDailyIntention(data.intention.text || ""); setIntentionDate(data.intention.date || ""); }
         if (remote) { saveJSON(STORE, data); _wsLastPush = Date.now(); }
       }
       const keys = loadJSON(KEYS_STORE, null);
       if (keys) setKeyBindings({ ...DEFAULT_KEYS, ...keys });
       setLoaded(true);
       wsStartPoll();
+      // Show intention prompt if no intention set today
+      const today = new Date().toISOString().split("T")[0];
+      if (!data?.intention?.date || data.intention.date !== today) {
+        setTimeout(() => setShowIntentionPrompt(true), 300);
+      }
     });
   }, []);
 
@@ -266,8 +285,10 @@ function Workspace() {
   useEffect(() => {
     window._wsApplyRemote = (remote) => {
       if (remote && remote.nodes) {
-        setNodes(remote.nodes.map((n) => ({ ...n, tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
+        setNodes(remote.nodes.map((n) => ({ ...n, sessions: n.sessions || [], tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
         setConnections(remote.connections || []);
+        if (remote.focusSessions) setFocusSessions(remote.focusSessions);
+        if (remote.intention) { setDailyIntention(remote.intention.text || ""); setIntentionDate(remote.intention.date || ""); }
         saveJSON(STORE, remote);
       }
     };
@@ -275,7 +296,7 @@ function Workspace() {
   }, []);
 
   // Save (local + cloud)
-  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, _ts: Date.now() }; saveJSON(STORE, payload); wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, loaded]);
+  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, focusSessions, intention: { text: dailyIntention, date: intentionDate }, _ts: Date.now() }; saveJSON(STORE, payload); wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, focusSessions, dailyIntention, intentionDate, loaded]);
   useEffect(() => { if (loaded) { const t = setTimeout(() => saveJSON(KEYS_STORE, keyBindings), 300); return () => clearTimeout(t); } }, [keyBindings, loaded]);
 
   const visibleNodes = nodes.filter((n) => n.parentId === viewParentId);
@@ -319,6 +340,44 @@ function Workspace() {
   const quickChild = useCallback((pid) => { const p = getNode(pid); if (!p) return; setViewParentId(pid); setOffset({ x: 0, y: 0 }); setTimeout(() => { const ex = nodes.filter((n) => n.parentId === pid); addNode(pid, 60, 60 + ex.length * 90, p.colorIdx); }, 50); }, [getNode, nodes, addNode]);
   const quickSibling = useCallback((nid) => { const nd = getNode(nid); if (!nd) return; const sibs = nodes.filter((n) => n.parentId === nd.parentId); let x = nd.x + 220, y = nd.y; const occ = sibs.map((s) => ({ x: s.x, y: s.y })); let t = 0; while (t < 20) { if (!occ.some((o) => Math.abs(o.x - x) < 200 && Math.abs(o.y - y) < 80)) break; y += 90; t++; } const n = addNode(nd.parentId, x, y, nd.colorIdx); setConnections((p) => [...p, { from: nid, to: n.id }]); }, [getNode, nodes, addNode]);
 
+  // ============ FOCUS MODE ============
+  const enterFocus = useCallback((nid) => {
+    setFocusNodeId(nid); setFocusStart(Date.now()); setFocusMicroStep(""); setFocusExitNote(""); setFocusElapsed(0);
+    setSelectedId(null); setEditingId(null); setEditingField(null);
+    setTimeout(() => microRef.current?.focus(), 100);
+  }, []);
+  const exitFocus = useCallback((save) => {
+    if (save && focusNodeId && focusStart) {
+      const dur = Math.round((Date.now() - focusStart) / 1000);
+      const nd = nodes.find((n) => n.id === focusNodeId);
+      const readyTask = nd ? (nd.tasks || []).find((t) => t.status === "ready") : null;
+      const session = { id: uid(), nodeId: focusNodeId, startedAt: focusStart, duration: dur, microStep: focusMicroStep, exitNote: focusExitNote, taskText: readyTask ? readyTask.text : "", date: new Date().toISOString().split("T")[0] };
+      setFocusSessions((p) => [...p, session]);
+      // Store last session on the node
+      setNodes((p) => p.map((n) => n.id === focusNodeId ? { ...n, lastSession: { timestamp: Date.now(), duration: dur, task: readyTask ? readyTask.text : "", exitNote: focusExitNote } } : n));
+    }
+    setFocusNodeId(null); setFocusStart(null); setFocusMicroStep(""); setFocusExitNote("");
+  }, [focusNodeId, focusStart, focusMicroStep, focusExitNote, nodes]);
+
+  // Focus timer tick
+  useEffect(() => {
+    if (!focusStart) return;
+    const iv = setInterval(() => setFocusElapsed(Math.round((Date.now() - focusStart) / 1000)), 1000);
+    return () => clearInterval(iv);
+  }, [focusStart]);
+
+  // ============ MOMENTUM ============
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayFocusMins = useMemo(() => {
+    return Math.round(focusSessions.filter((s) => s.date === todayStr).reduce((a, s) => a + (s.duration || 0), 0) / 60);
+  }, [focusSessions, todayStr]);
+  const todayDoneCount = useMemo(() => {
+    let c = 0; nodes.forEach((n) => (n.tasks || []).forEach((t) => { if (t.status === "done" && isToday(t.completedAt)) c++; })); return c;
+  }, [nodes]);
+  const momentumPct = useMemo(() => Math.min(100, todayDoneCount * 12 + todayFocusMins * 2), [todayDoneCount, todayFocusMins]);
+
+  const fmtTimer = (secs) => { const m = Math.floor(secs / 60); const s = secs % 60; return `${m}:${s < 10 ? "0" : ""}${s}`; };
+
   const handleCanvasDblClick = useCallback((e) => { if (e.target !== canvasRef.current && !e.target.classList.contains("ci")) return; const r = canvasRef.current.getBoundingClientRect(); const pn = viewParentId ? getNode(viewParentId) : null; addNode(viewParentId, e.clientX - r.left - offset.x, e.clientY - r.top - offset.y, pn?.colorIdx || 0); }, [offset, viewParentId, addNode, getNode]);
   const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
   const handleNodeMouseDown = useCallback((e, nid) => { if (e.button === 2) return; e.stopPropagation(); if (connectingFrom) { if (connectingFrom !== nid) { setConnections((p) => { const ex = p.some((c) => (c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom)); if (ex) return p.filter((c) => !((c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom))); return [...p, { from: connectingFrom, to: nid }]; }); } setConnectingFrom(null); return; } setSelectedId(nid); const nd = nodes.find((n) => n.id === nid); if (!nd) return; setDragState({ id: nid, sx: e.clientX, sy: e.clientY, ox: nd.x, oy: nd.y }); }, [nodes, connectingFrom]);
@@ -339,9 +398,9 @@ function Workspace() {
   useEffect(() => {
     const h = (e) => {
       if (remapTarget) return;
-      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen;
+      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId;
       if (matchBind(e, keyBindings.find)) { e.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }
-      if (e.key === "Escape") { if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
+      if (e.key === "Escape") { if (focusNodeId) { exitFocus(true); } else if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
       if (!busy) {
         if (matchBind(e, keyBindings.goUp) && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
         if (e.key === "Backspace" && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
@@ -352,12 +411,13 @@ function Workspace() {
           if (matchBind(e, keyBindings.addTask)) { e.preventDefault(); startAddTask(selectedId); }
           if (matchBind(e, keyBindings.promote)) { e.preventDefault(); promoteNode(selectedId); }
           if (matchBind(e, keyBindings.demote)) { e.preventDefault(); demoteNode(selectedId); }
+          if (matchBind(e, keyBindings.focus)) { e.preventDefault(); enterFocus(selectedId); }
         }
         if (e.key === "?" && !busy) { e.preventDefault(); setRemapOpen(!remapOpen); }
       }
     };
     window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
-  }, [editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, getNode, selectedId, quickSibling, quickChild, nodes, startAddTask, stopAddTask, commitEditTask, commitBlock, promoteNode, demoteNode, keyBindings, remapOpen, remapTarget]);
+  }, [editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, getNode, selectedId, quickSibling, quickChild, nodes, startAddTask, stopAddTask, commitEditTask, commitBlock, promoteNode, demoteNode, keyBindings, remapOpen, remapTarget, focusNodeId, enterFocus, exitFocus]);
 
   const getCenter = useCallback((id) => { const n = nodes.find((x) => x.id === id); return n ? { x: n.x + 100, y: n.y + 28 } : { x: 0, y: 0 }; }, [nodes]);
   const visIds = new Set(visibleNodes.map((n) => n.id));
@@ -368,6 +428,7 @@ function Workspace() {
   const panelW = panelOpen ? 260 : 0;
 
   const contextKeys = useMemo(() => {
+    if (focusNodeId) return [{ label: "exit focus", key: "esc" }];
     if (remapOpen) return [{ label: "close settings", key: "esc" }];
     if (searchOpen) return [{ label: "close", key: "esc" }];
     if (editingId || taskInputNodeId || editingTaskId || editingBlockReason) {
@@ -377,11 +438,11 @@ function Workspace() {
       return r;
     }
     const r = [{ label: "new node", key: "dbl-click" }];
-    if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
+    if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.focus.label, key: fmtBind(keyBindings.focus) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
     if (viewParentId) r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) });
     r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: "settings", key: "?" });
     return r;
-  }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen]);
+  }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen, focusNodeId]);
 
   if (!loaded) return <div style={{ height: "100vh", background: "#0a0a0b", display: "flex", alignItems: "center", justifyContent: "center", color: "#525252", fontFamily: F, fontSize: 13 }}>loading...</div>;
 
@@ -516,19 +577,82 @@ function Workspace() {
                 {!isTA && isSel && <button onClick={(e) => { e.stopPropagation(); startAddTask(node.id); }} style={{ background: "none", border: "none", color: co.text + "20", fontSize: 10, cursor: "pointer", padding: "3px 0", fontFamily: F }}>+ task</button>}
               </div>}
               {!node.collapsed && !isSel && !hasTasks && rc > 0 && <div style={{ borderTop: `1px solid ${co.border}15`, padding: "4px 10px" }}><span style={{ color: SM.ready.color + "50", fontSize: 10 }}>{rc} ready inside</span></div>}
+              {!node.collapsed && node.lastSession && <div style={{ borderTop: `1px solid ${co.border}10`, padding: "4px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ color: co.accent + "50", fontSize: 9 }}>Last: {Math.round(node.lastSession.duration / 60)}m {node.lastSession.task ? "on " + node.lastSession.task : ""}</span>
+                {node.lastSession.exitNote && <span style={{ color: co.text + "40", fontSize: 9, fontStyle: "italic" }}>{node.lastSession.exitNote}</span>}
+              </div>}
             </div>
           );
         })}
       </div>
 
+      {/* Focus Mode Overlay */}
+      {focusNodeId && (() => {
+        const fn = nodes.find((n) => n.id === focusNodeId);
+        if (!fn) return null;
+        const co = COLORS[fn.colorIdx];
+        const readyTasks = (fn.tasks || []).filter((t) => t.status === "ready");
+        const firstReady = readyTasks[0];
+        const [showExit, setShowExit_] = [focusExitNote !== null && focusStart && focusElapsed > 5, null];
+        return (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#0a0a0b", zIndex: 500, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: F, gap: 32, padding: 40 }}>
+            <div style={{ color: co.accent + "40", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.15em" }}>focus</div>
+            <div style={{ color: co.text, fontSize: 24, fontWeight: 700, textAlign: "center" }}>{fn.title || "untitled"}</div>
+            <div style={{ color: "#22c55e", fontSize: 48, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtTimer(focusElapsed)}</div>
+            {firstReady && <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 20px", background: SM.ready.color + "10", border: "1px solid " + SM.ready.color + "30", borderRadius: 8 }}>
+              <span style={{ color: SM.ready.color, fontSize: 12 }}>{SM.ready.icon}</span>
+              <span style={{ color: co.text + "c0", fontSize: 14 }}>{firstReady.text}</span>
+              <button onClick={() => { cycleTaskStatus(focusNodeId, firstReady.id); }} style={{ background: "none", border: "1px solid " + SM.ready.color + "40", color: SM.ready.color, fontSize: 10, padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontFamily: F, marginLeft: 8 }}>done</button>
+            </div>}
+            {readyTasks.length > 1 && <div style={{ color: "#404040", fontSize: 11 }}>{readyTasks.length - 1} more ready</div>}
+            <div style={{ width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 12 }}>
+              <input ref={microRef} value={focusMicroStep} onChange={(e) => setFocusMicroStep(e.target.value)} placeholder="What's the first physical action?" style={{ background: "none", border: "none", borderBottom: "1px solid " + co.accent + "30", outline: "none", color: co.text + "b0", fontSize: 13, fontFamily: F, padding: "8px 0", textAlign: "center", width: "100%" }} />
+              <input ref={exitNoteRef} value={focusExitNote} onChange={(e) => setFocusExitNote(e.target.value)} placeholder="Where you left off..." style={{ background: "none", border: "none", borderBottom: "1px solid #333", outline: "none", color: "#888", fontSize: 11, fontFamily: F, padding: "6px 0", textAlign: "center", width: "100%" }} />
+            </div>
+            <button onClick={() => exitFocus(true)} style={{ background: "none", border: "1px solid #333", color: "#666", fontSize: 11, padding: "8px 24px", borderRadius: 6, cursor: "pointer", fontFamily: F, marginTop: 12 }}>exit focus (esc)</button>
+          </div>
+        );
+      })()}
+
+      {/* Daily Intention Prompt */}
+      {showIntentionPrompt && !focusNodeId && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#0a0a0bee", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center", maxWidth: 400, padding: 40 }}>
+            <div style={{ color: "#404040", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.15em" }}>new day</div>
+            <div style={{ color: "#e2e8f0", fontSize: 18, fontWeight: 600, textAlign: "center" }}>What's the one thing today?</div>
+            <input ref={intentionRef} value={dailyIntention} onChange={(e) => setDailyIntention(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && dailyIntention.trim()) { setIntentionDate(todayStr); setShowIntentionPrompt(false); } if (e.key === "Escape") setShowIntentionPrompt(false); }} placeholder="One thing..." autoFocus style={{ background: "none", border: "none", borderBottom: "2px solid #f59e0b40", outline: "none", color: "#f59e0b", fontSize: 16, fontFamily: F, padding: "8px 0", textAlign: "center", width: "100%", maxWidth: 320 }} />
+            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+              <button onClick={() => setShowIntentionPrompt(false)} style={{ background: "none", border: "1px solid #222", color: "#555", fontSize: 11, padding: "6px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>skip</button>
+              <button onClick={() => { if (dailyIntention.trim()) { setIntentionDate(todayStr); } setShowIntentionPrompt(false); }} style={{ background: "#f59e0b20", border: "1px solid #f59e0b40", color: "#f59e0b", fontSize: 11, padding: "6px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>set</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Intention in top bar */}
+      {dailyIntention && intentionDate === todayStr && !focusNodeId && (
+        <div style={{ position: "fixed", top: 68, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 99, pointerEvents: "none" }}>
+          <div style={{ background: "#0a0a0bc0", border: "1px solid #f59e0b20", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "4px 16px", pointerEvents: "auto" }}>
+            <span style={{ color: "#f59e0b80", fontSize: 11 }}>{dailyIntention}</span>
+          </div>
+        </div>
+      )}
+
       {/* Legend */}
-      {legendVisible && <div style={{ position: "fixed", bottom: 10, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 100, pointerEvents: "none" }}>
+      {legendVisible && <div style={{ position: "fixed", bottom: momentumPct > 0 ? 18 : 10, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 100, pointerEvents: "none" }}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", padding: "4px 12px", background: "#0a0a0bc0", borderRadius: 6, border: "1px solid #1a1a1c", pointerEvents: "auto" }}>
           {contextKeys.map((k, i) => <span key={i} style={{ fontSize: 10, color: "#404040" }}><span style={{ color: "#606060", background: "#1a1a1c", padding: "1px 5px", borderRadius: 2, marginRight: 4, fontFamily: F }}>{k.key}</span>{k.label}</span>)}
           <span onClick={() => setLegendVisible(false)} style={{ fontSize: 10, color: "#333", cursor: "pointer", marginLeft: 4 }}>×</span>
         </div>
       </div>}
-      {!legendVisible && <button onClick={() => setLegendVisible(true)} style={{ position: "fixed", bottom: 10, right: 10, background: "#111113", border: "1px solid #1a1a1c", color: "#404040", fontSize: 10, padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontFamily: F, zIndex: 100 }}>?</button>}
+      {!legendVisible && <button onClick={() => setLegendVisible(true)} style={{ position: "fixed", bottom: momentumPct > 0 ? 18 : 10, right: 10, background: "#111113", border: "1px solid #1a1a1c", color: "#404040", fontSize: 10, padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontFamily: F, zIndex: 100 }}>?</button>}
+
+      {/* Momentum Strip */}
+      {!focusNodeId && (todayDoneCount > 0 || todayFocusMins > 0) && (
+        <div style={{ position: "fixed", bottom: 0, left: panelW, right: 0, height: 6, background: "#111113", zIndex: 101, transition: "left 0.2s" }}>
+          <div style={{ height: "100%", width: momentumPct + "%", background: "linear-gradient(90deg, #22c55e40, #22c55e)", borderRadius: "0 3px 3px 0", transition: "width 0.5s ease" }} />
+        </div>
+      )}
     </div>
   );
 }
