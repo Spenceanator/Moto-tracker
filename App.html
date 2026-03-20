@@ -8,7 +8,6 @@
 <meta name="apple-mobile-web-app-title" content="Drydock">
 <meta name="theme-color" content="#0a0a0a">
 <title>Drydock</title>
-<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg:#0a0a0a;--surface:rgba(255,255,255,0.03);--border:#222;--borderL:#333;
@@ -81,11 +80,13 @@
 <body>
 <div id="app"></div>
 <script>
-var SUPABASE_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
-var SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
-var sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
+var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
+var AUTH_SK="drydock_auth";
+function getAuth(){try{var s=JSON.parse(localStorage.getItem(AUTH_SK));if(s&&s.access_token&&s.expires_at>Date.now()/1000)return s}catch(e){}return null}
+function sbHeaders(){var a=getAuth();return{"apikey":SB_KEY,"Authorization":"Bearer "+(a?a.access_token:SB_KEY),"Content-Type":"application/json"}}
 // Auth gate
-sb.auth.getSession().then(function(res){if(!res.data.session){window.location.href="index.html"}});
+if(!getAuth()){window.location.href="index.html"}
 
 var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="4.7.0";
 var DT=[
@@ -152,20 +153,26 @@ function save(){try{data._ts=Date.now();localStorage.setItem(SK,JSON.stringify(d
 var _syncTimer=null,_syncing=0,_lastPushTs=0,_pollInt=null,_localDirty=0;
 function syncPush(){_localDirty=1;if(_syncTimer)clearTimeout(_syncTimer);_syncTimer=setTimeout(function(){_doSync()},2000)}
 function _doSync(){
-  if(_syncing)return;_syncing=1;
-  var payload={id:"main",data:JSON.parse(JSON.stringify(data)),updated_at:new Date().toISOString()};
-  sb.from("sync").upsert(payload).then(function(res){
-    _syncing=0;
-    if(res.error){console.error("Sync push failed:",res.error);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"};return}
-    _localDirty=0;_lastPushTs=Date.now();
+  if(_syncing||!getAuth())return;_syncing=1;
+  var url=SB_URL+"/rest/v1/sync?id=eq.main";
+  var now=new Date().toISOString();
+  var body=JSON.stringify({id:"main",data:JSON.parse(JSON.stringify(data)),updated_at:now});
+  fetch(url,{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
+    var method=rows.length>0?"PATCH":"POST";
+    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/sync";
+    var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
+    return fetch(postUrl,{method:method,headers:hdrs,body:body})
+  }).then(function(r){
+    _syncing=0;_localDirty=0;_lastPushTs=Date.now();
     var el=document.getElementById("sync-dot");if(el){el.style.background="#22c55e";el.title="Synced"}
     startPoll();
-  })
+  }).catch(function(e){_syncing=0;console.error("Sync push failed:",e);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"}})
 }
 function syncPull(cb,force){
-  sb.from("sync").select("data,updated_at").eq("id","main").then(function(res){
-    if(res.error){console.error("Sync pull failed:",res.error);flash("Sync pull failed");if(cb)cb();return}
-    var rows=res.data||[];
+  if(!getAuth()){if(cb)cb();return}
+  fetch(SB_URL+"/rest/v1/sync?id=eq.main&select=data,updated_at",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data){
       var remote=rows[0].data;var remoteTs=remote._ts||0;var localTs=data._ts||0;
       if(force||remoteTs>localTs){
@@ -176,15 +183,16 @@ function syncPull(cb,force){
       }
     }else if(force){flash("Nothing in cloud yet")}
     if(cb)cb()
-  })
+  }).catch(function(e){console.error("Sync pull failed:",e);flash("Sync pull failed");if(cb)cb()})
 }
 function startPoll(){if(_pollInt)return;_pollInt=setInterval(pollCheck,15000)}
 function stopPoll(){if(_pollInt){clearInterval(_pollInt);_pollInt=null}}
 function pollCheck(){
-  if(_syncing)return;
-  sb.from("sync").select("updated_at").eq("id","main").then(function(res){
-    if(res.error||!res.data||res.data.length===0)return;
-    var remoteTime=new Date(res.data[0].updated_at).getTime();
+  if(_syncing||!getAuth())return;
+  fetch(SB_URL+"/rest/v1/sync?id=eq.main&select=updated_at",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
+    if(!rows||rows.length===0)return;
+    var remoteTime=new Date(rows[0].updated_at).getTime();
     if(remoteTime>_lastPushTs){
       if(_localDirty){
         var el=document.getElementById("sync-dot");if(el){el.style.background="#f59e0b";el.title="Remote changed — tap Pull to update"}
@@ -192,7 +200,7 @@ function pollCheck(){
         syncPull(function(){var el=document.getElementById("sync-dot");if(el){el.style.background="#22c55e"}})
       }
     }
-  })
+  }).catch(function(){})
 }
 function flash(msg){var el=document.createElement("div");el.textContent=msg||"Saved";Object.assign(el.style,{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 12px)",left:"50%",transform:"translateX(-50%)",background:"#22c55e",color:"#000",padding:"8px 20px",borderRadius:"8px",fontSize:"13px",fontWeight:"700",fontFamily:"var(--font)",zIndex:"9999",opacity:"1",transition:"opacity 0.3s"});document.body.appendChild(el);setTimeout(function(){el.style.opacity="0";setTimeout(function(){el.remove()},300)},1200)}
 function mid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
@@ -625,11 +633,9 @@ function rSettings(){
   // Account
   root.append(h("div",{style:{borderTop:"1px solid #222",marginTop:"12px",paddingTop:"12px"}}));
   root.append(h("span",{class:"lbl",style:{color:"#ef4444"}},"Account"));
-  sb.auth.getSession().then(function(res){
-    var emailEl=document.getElementById("account-email");
-    if(emailEl&&res.data.session)emailEl.textContent=res.data.session.user.email});
-  root.append(h("span",{id:"account-email",style:{color:"#888",fontSize:"11px"}},""));
-  root.append(h("button",{class:"bs",style:{color:"#ef4444",borderColor:"rgba(239,68,68,0.3)",marginTop:"4px"},onClick:function(){sb.auth.signOut().then(function(){window.location.href="index.html"})}},"Sign out"));
+  var auth=getAuth();
+  root.append(h("span",{style:{color:"#888",fontSize:"11px"}},auth?auth.email:"Not signed in"));
+  root.append(h("button",{class:"bs",style:{color:"#ef4444",borderColor:"rgba(239,68,68,0.3)",marginTop:"4px"},onClick:function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"}},"Sign out"));
 
   // Vehicle list
   root.append(h("div",{style:{borderTop:"1px solid #222",marginTop:"12px",paddingTop:"12px"}}));
