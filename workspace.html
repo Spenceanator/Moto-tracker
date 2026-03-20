@@ -43,11 +43,11 @@ function saveNotebooks(nbs){
   try{localStorage.setItem(NB_LIST_KEY,JSON.stringify(nbs))}catch(e){}
   // Sync notebook list to cloud
   if(getAuth()){
-    var url=SB_URL+"/rest/v1/sync?id=eq.ws-notebooks";
+    var url=SB_URL+"/rest/v1/notebooks?id=eq.ws-notebooks";
     var body=JSON.stringify({id:"ws-notebooks",data:{notebooks:nbs},updated_at:new Date().toISOString()});
     fetch(url,{method:"GET",headers:sbHeaders()}).then(function(r){return r.json()}).then(function(rows){
       var method=rows.length>0?"PATCH":"POST";
-      var postUrl=rows.length>0?url:SB_URL+"/rest/v1/sync";
+      var postUrl=rows.length>0?url:SB_URL+"/rest/v1/notebooks";
       var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
       fetch(postUrl,{method:method,headers:hdrs,body:body});
     }).catch(function(){});
@@ -55,7 +55,7 @@ function saveNotebooks(nbs){
 }
 function pullNotebooks(cb){
   if(!getAuth()){if(cb)cb();return}
-  fetch(SB_URL+"/rest/v1/sync?id=eq.ws-notebooks&select=data",{method:"GET",headers:sbHeaders()})
+  fetch(SB_URL+"/rest/v1/notebooks?id=eq.ws-notebooks&select=data",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data&&rows[0].data.notebooks){
       localStorage.setItem(NB_LIST_KEY,JSON.stringify(rows[0].data.notebooks));
@@ -74,14 +74,14 @@ function getStoreKey(){return"ws-nb-"+getActiveNbId()}
 (function(){var old=localStorage.getItem("ws-v7");var nb=localStorage.getItem("ws-nb-default");if(old&&!nb){localStorage.setItem("ws-nb-default",old);console.log("Migrated ws-v7 to default notebook")}})();
 // Migrate old cloud sync ID "workspace" to "ws-nb-default"
 (function(){if(!getAuth())return;
-  fetch(SB_URL+"/rest/v1/sync?id=eq.workspace&select=data",{method:"GET",headers:sbHeaders()})
+  fetch(SB_URL+"/rest/v1/notebooks?id=eq.workspace&select=data",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data){
-      fetch(SB_URL+"/rest/v1/sync?id=eq.ws-nb-default&select=data",{method:"GET",headers:sbHeaders()})
+      fetch(SB_URL+"/rest/v1/notebooks?id=eq.ws-nb-default&select=data",{method:"GET",headers:sbHeaders()})
       .then(function(r2){return r2.json()}).then(function(rows2){
         if(rows2.length===0){
           var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
-          fetch(SB_URL+"/rest/v1/sync",{method:"POST",headers:hdrs,body:JSON.stringify({id:"ws-nb-default",data:rows[0].data,updated_at:new Date().toISOString()})});
+          fetch(SB_URL+"/rest/v1/notebooks",{method:"POST",headers:hdrs,body:JSON.stringify({id:"ws-nb-default",data:rows[0].data,updated_at:new Date().toISOString()})});
           console.log("Migrated cloud workspace to ws-nb-default");
         }
       });
@@ -133,12 +133,12 @@ function wsSyncPush(data){
 function _wsDoSync(data){
   if(_wsSyncing||!getAuth())return;_wsSyncing=1;
   var sid=getSyncId();
-  var url=SB_URL+"/rest/v1/sync?id=eq."+sid;
+  var url=SB_URL+"/rest/v1/notebooks?id=eq."+sid;
   var body=JSON.stringify({id:sid,data:data,updated_at:new Date().toISOString()});
   fetch(url,{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     var method=rows.length>0?"PATCH":"POST";
-    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/sync";
+    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/notebooks";
     var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
     return fetch(postUrl,{method:method,headers:hdrs,body:body});
   }).then(function(){
@@ -148,7 +148,7 @@ function _wsDoSync(data){
 function wsSyncPull(cb){
   if(!getAuth()){if(cb)cb(null);return}
   var sid=getSyncId();
-  fetch(SB_URL+"/rest/v1/sync?id=eq."+sid+"&select=data,updated_at",{method:"GET",headers:sbHeaders()})
+  fetch(SB_URL+"/rest/v1/notebooks?id=eq."+sid+"&select=data,updated_at",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data){cb(rows[0].data)}else{cb(null)}
   }).catch(function(e){console.error("WS sync pull failed:",e);cb(null)});
@@ -158,7 +158,7 @@ function wsStopPoll(){if(_wsPollInt){clearInterval(_wsPollInt);_wsPollInt=null}}
 function wsPollCheck(){
   if(_wsSyncing||!getAuth())return;
   var sid=getSyncId();
-  fetch(SB_URL+"/rest/v1/sync?id=eq."+sid+"&select=updated_at",{method:"GET",headers:sbHeaders()})
+  fetch(SB_URL+"/rest/v1/notebooks?id=eq."+sid+"&select=updated_at",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     if(!rows||rows.length===0)return;
     var remoteTime=new Date(rows[0].updated_at).getTime();
