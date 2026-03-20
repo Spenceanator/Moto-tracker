@@ -246,6 +246,38 @@ function dismissIntake(item){
   _intakeItems=_intakeItems.filter(function(i){return i.id!==item.id});
   R();
 }
+// ============ JOB SHARING ============
+function getShareToken(job){
+  if(job.shareToken)return job.shareToken;
+  var token=mid()+mid();job.shareToken=token;save();return token;
+}
+function getStatusUrl(job){
+  var base=window.location.href.replace(/\/[^\/]*$/,"/");
+  return base+"status.html?t="+getShareToken(job);
+}
+function pushJobPublic(job){
+  if(!job.shareToken||!getAuth())return;
+  var vTitle=[job.vehicleYear,job.vehicleMake,job.vehicleModel].filter(Boolean).join(" ")||"";
+  var tasks=(job.tasks||[]).filter(function(t){return t.verified}).map(function(t){return{text:t.name,status:t.done?"done":t.blocked?"blocked":"ready"}});
+  var payload={
+    token:job.shareToken,
+    customer_name:job.customer||"",
+    vehicle:vTitle,
+    status:job.status||"intake",
+    problem:job.problem||"",
+    scheduled_date:job.scheduledDate||"",
+    tasks_summary:tasks,
+    notes_public:job.publicNotes||"",
+    updated_at:new Date().toISOString()
+  };
+  var url=SB_URL+"/rest/v1/job_public?token=eq."+job.shareToken;
+  fetch(url,{method:"GET",headers:sbHeaders()}).then(function(r){return r.json()}).then(function(rows){
+    var method=rows.length>0?"PATCH":"POST";
+    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/job_public";
+    var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
+    fetch(postUrl,{method:method,headers:hdrs,body:JSON.stringify(payload)});
+  }).catch(function(e){console.error("Push job_public failed:",e)});
+}
 function flash(msg){var el=document.createElement("div");el.textContent=msg||"Saved";Object.assign(el.style,{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 12px)",left:"50%",transform:"translateX(-50%)",background:"#22c55e",color:"#000",padding:"8px 20px",borderRadius:"8px",fontSize:"13px",fontWeight:"700",fontFamily:"var(--font)",zIndex:"9999",opacity:"1",transition:"opacity 0.3s"});document.body.appendChild(el);setTimeout(function(){el.style.opacity="0";setTimeout(function(){el.remove()},300)},1200)}
 function mid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function S(v){return v==null?"":String(v)}
@@ -376,7 +408,7 @@ function rTask(task,bike){
     var vBtn=h("button",{style:{padding:"3px 6px",borderRadius:"4px",fontSize:"9px",fontWeight:700,border:"1px solid #a855f7",background:"rgba(168,85,247,0.15)",color:"#a855f7",cursor:"pointer",flexShrink:0},onClick:function(){task.verified=1;ss();R()}},"VERIFY");
     main.append(vBtn);
   }else{
-    main.append(ckbox(task.done,function(){task.done=!task.done;task.completedAt=task.done?Date.now():null;ss();R()}));
+    main.append(ckbox(task.done,function(){task.done=!task.done;task.completedAt=task.done?Date.now():null;ss();if(bike.shareToken)pushJobPublic(bike);R()}));
   }
   main.append(h("span",{style:{flex:1,color:task.done?"#666":unv?"#a855f7":"#e5e5e5",textDecoration:task.done?"line-through":"none",fontStyle:unv&&!task.done?"italic":"normal",cursor:"pointer",lineHeight:1.4},onClick:function(){ui.tExp[task.id]=!ui.tExp[task.id];R()}},task.name));
   if(task.cost&&!ui.tExp[task.id])main.append(h("span",{style:{color:task.costLogged?"#22c55e":"#f59e0b",fontSize:"11px",flexShrink:0}},"$"+task.cost+(task.costLogged?" \u2713":"")));
@@ -886,6 +918,15 @@ function rJobView(){
   if(job.problem&&!ui.jEdit)info.append(h("p",{style:{marginTop:"4px",color:"#888",fontSize:"13px",lineHeight:1.4}},job.problem));
   hdr.append(info);hdr.append(badge(job.status));root.append(hdr);
 
+  // Share link
+  var shareRow=h("div",{class:"f ac g8"});
+  var shareBtn=h("button",{class:"bs",style:{fontSize:"10px",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)"},onClick:function(){
+    var url=getStatusUrl(job);pushJobPublic(job);
+    navigator.clipboard.writeText(url).then(function(){flash("Status link copied")}).catch(function(){prompt("Copy this link:",url)});
+  }});shareBtn.append(ic("copy")," Share status");shareRow.append(shareBtn);
+  if(job.shareToken)shareRow.append(h("span",{style:{color:"#444",fontSize:"10px"}},"Live"));
+  root.append(shareRow);
+
   // Status advance bar
   var sc_={intake:"#22d3ee","in-progress":"#f59e0b",waiting:"#ef4444",done:"#22c55e",delivered:"#888"};
   var statusBar=h("div",{class:"f g4",style:{padding:"4px",background:"rgba(255,255,255,0.03)",borderRadius:"10px"}});
@@ -895,7 +936,7 @@ function rJobView(){
     if(s==="delivered")job.deliveredAt=Date.now();
     if(s!=="done"&&s!=="delivered"){job.completedAt=null;job.deliveredAt=null}
     if(s!=="in-progress"&&s!=="waiting"&&job.timerStart){job.laborSeconds=getJobSecs(job);job.timerStart=null}
-    save();R();flash(s)}},s.replace("-"," "));statusBar.append(b)});
+    save();if(job.shareToken)pushJobPublic(job);R();flash(s)}},s.replace("-"," "));statusBar.append(b)});
   root.append(statusBar);
 
   // Timer
@@ -974,7 +1015,12 @@ function rJobView(){
     if(done.length>0){var sec3=h("div",{class:"fc g6"});var tog=h("button",{class:"f ac g6",style:{color:"#22c55e",fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",padding:0},onClick:function(){ui.showDone=!ui.showDone;R()}});var ch_=document.createElement("span");ch_.innerHTML=chev(ui.showDone);ch_.style.display="flex";tog.append(ch_," Done ("+done.length+")");sec3.append(tog);if(ui.showDone)done.forEach(function(t){sec3.append(rTask(t,job))});c.append(sec3)}
     if(!ready.length&&!blocked.length&&!done.length)c.append(h("p",{style:{color:"#555",fontSize:"13px",textAlign:"center",padding:"20px"}},"No tasks yet."));
     root.append(c);
-  }else if(ui.bTab==="notes"){var w=h("div",{class:"fc g12"});w.append(h("p",{style:{color:"#777",fontSize:"12px"}},"Working notes"));var ta=h("textarea",{rows:"14",placeholder:"Parts needed, observations, follow-up...",onInput:function(e){job.notes=e.target.value;ss()}});ta.value=job.notes||"";w.append(ta,h("span",{style:{color:"#555",fontSize:"11px"}},"Auto-saves"));root.append(w)}
+  }else if(ui.bTab==="notes"){var w=h("div",{class:"fc g12"});w.append(h("p",{style:{color:"#777",fontSize:"12px"}},"Working notes (private)"));var ta=h("textarea",{rows:"10",placeholder:"Parts needed, observations, follow-up...",onInput:function(e){job.notes=e.target.value;ss()}});ta.value=job.notes||"";w.append(ta);
+    w.append(h("p",{style:{color:"#22d3ee",fontSize:"12px",marginTop:"8px"}},"Customer-visible notes"));
+    w.append(h("p",{style:{color:"#555",fontSize:"11px"}},"Shown on the shared status page when you share a job link."));
+    var pubTa=h("textarea",{rows:"6",placeholder:"Update for the customer...",style:{borderColor:"rgba(34,211,238,0.2)"},onInput:function(e){job.publicNotes=e.target.value;ss()}});pubTa.value=job.publicNotes||"";w.append(pubTa);
+    if(job.shareToken)w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)",fontSize:"11px"},onClick:function(){pushJobPublic(job);flash("Status page updated")}},"Push update now"));
+    w.append(h("span",{style:{color:"#555",fontSize:"11px"}},"Auto-saves"));root.append(w)}
 
   // Timestamps
   var ts=h("div",{class:"f g12 fw",style:{fontSize:"10px",color:"#555",padding:"8px 0"}});

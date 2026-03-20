@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a0a">
+<title>Drydock — Job Status</title>
+<style>
+  :root{--bg:#0a0a0a;--surface:rgba(255,255,255,0.03);--border:#222;--borderL:#333;--text:#e5e5e5;--dim:#888;--muted:#555;--amber:#f59e0b;--red:#ef4444;--green:#22c55e;--cyan:#22d3ee;--blue:#60a5fa;--font:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace;--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px)}
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5;padding:var(--safe-top) 16px var(--safe-bottom);min-height:100dvh;max-width:480px;margin:0 auto;-webkit-font-smoothing:antialiased}
+  .wrap{padding:40px 0 60px;display:flex;flex-direction:column;gap:20px}
+  .logo{text-align:center}
+  .logo h1{font-size:28px;font-weight:800;color:var(--amber);letter-spacing:-0.5px}
+  .logo p{color:var(--muted);font-size:12px;margin-top:4px}
+  .card{padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;gap:10px}
+  .status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+  .vehicle{color:var(--cyan);font-size:16px;font-weight:700}
+  .problem{color:var(--dim);font-size:13px;line-height:1.5}
+  .section{display:flex;flex-direction:column;gap:6px}
+  .section-label{color:var(--amber);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px}
+  .task{display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:6px;font-size:12px}
+  .task-icon{font-size:10px;flex-shrink:0}
+  .task-text{flex:1}
+  .note{padding:12px;background:rgba(34,211,238,0.04);border:1px solid rgba(34,211,238,0.12);border-radius:8px;color:var(--dim);font-size:13px;line-height:1.5;white-space:pre-wrap}
+  .meta{color:var(--muted);font-size:11px}
+  .loading{text-align:center;color:var(--muted);font-size:13px;padding:40px}
+  .error{text-align:center;padding:40px 20px}
+  .error h2{color:var(--red);font-size:18px}
+  .error p{color:var(--muted);font-size:13px;margin-top:8px}
+  @media(prefers-color-scheme:dark){:root{color-scheme:dark}}
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <div class="logo">
+    <h1>DRYDOCK</h1>
+    <p>Job Status</p>
+  </div>
+  <div class="loading" id="loading">Loading...</div>
+</div>
+<script>
+var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
+var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
+
+var STATUS_COLORS={
+  submitted:{bg:"rgba(34,211,238,0.12)",color:"#22d3ee"},
+  intake:{bg:"rgba(34,211,238,0.12)",color:"#22d3ee"},
+  "in-progress":{bg:"rgba(245,158,11,0.12)",color:"#f59e0b"},
+  waiting:{bg:"rgba(239,68,68,0.12)",color:"#ef4444"},
+  done:{bg:"rgba(34,197,94,0.12)",color:"#22c55e"},
+  delivered:{bg:"rgba(255,255,255,0.06)",color:"#888"}
+};
+var TASK_ICONS={ready:{icon:"\u25C6",color:"#22c55e"},blocked:{icon:"\u25A0",color:"#ef4444"},done:{icon:"\u2713",color:"#525252"}};
+
+function getToken(){
+  var params=new URLSearchParams(window.location.search);
+  return params.get("t")||params.get("token")||"";
+}
+
+function render(job){
+  var root=document.getElementById("root");
+  var loading=document.getElementById("loading");
+  if(loading)loading.remove();
+
+  var sc=STATUS_COLORS[job.status]||STATUS_COLORS.submitted;
+
+  // Status badge
+  var badge=document.createElement("div");
+  badge.className="status-badge";
+  badge.style.background=sc.bg;badge.style.color=sc.color;
+  badge.textContent=job.status.replace("-"," ");
+  root.appendChild(badge);
+
+  // Card
+  var card=document.createElement("div");card.className="card";
+
+  // Customer
+  if(job.customer_name){var cn=document.createElement("span");cn.style.cssText="color:#888;font-size:12px";cn.textContent=job.customer_name;card.appendChild(cn)}
+
+  // Vehicle
+  if(job.vehicle){var veh=document.createElement("span");veh.className="vehicle";veh.textContent=job.vehicle;card.appendChild(veh)}
+
+  // Problem
+  if(job.problem){var prob=document.createElement("span");prob.className="problem";prob.textContent=job.problem;card.appendChild(prob)}
+
+  // Scheduled
+  if(job.scheduled_date){
+    var sd=document.createElement("span");
+    var isToday=job.scheduled_date===new Date().toISOString().split("T")[0];
+    var isPast=job.scheduled_date<new Date().toISOString().split("T")[0];
+    sd.style.cssText="font-size:12px;color:"+(isPast?"#ef4444":isToday?"#22c55e":"#60a5fa");
+    sd.textContent="\uD83D\uDCC5 "+(isToday?"Scheduled for today":isPast?"Was scheduled "+job.scheduled_date:"Scheduled: "+job.scheduled_date);
+    card.appendChild(sd);
+  }
+
+  root.appendChild(card);
+
+  // Tasks
+  var tasks=job.tasks_summary||[];
+  if(tasks.length>0){
+    var sec=document.createElement("div");sec.className="section";
+    var lbl=document.createElement("span");lbl.className="section-label";lbl.textContent="Work Items";sec.appendChild(lbl);
+    tasks.forEach(function(t){
+      var ti=TASK_ICONS[t.status]||TASK_ICONS.ready;
+      var row=document.createElement("div");row.className="task";
+      var icon=document.createElement("span");icon.className="task-icon";icon.style.color=ti.color;icon.textContent=ti.icon;
+      var text=document.createElement("span");text.className="task-text";
+      text.style.color=t.status==="done"?"#555":"#e5e5e5";
+      text.style.textDecoration=t.status==="done"?"line-through":"none";
+      text.textContent=t.text;
+      row.appendChild(icon);row.appendChild(text);sec.appendChild(row);
+    });
+    var counts=document.createElement("span");counts.style.cssText="font-size:11px;color:#555;margin-top:4px";
+    var dn=tasks.filter(function(t){return t.status==="done"}).length;
+    counts.textContent=dn+"/"+tasks.length+" completed";
+    sec.appendChild(counts);
+    root.appendChild(sec);
+  }
+
+  // Public notes
+  if(job.notes_public){
+    var noteW=document.createElement("div");noteW.className="section";
+    var nlbl=document.createElement("span");nlbl.className="section-label";nlbl.textContent="Notes from Drydock";noteW.appendChild(nlbl);
+    var note=document.createElement("div");note.className="note";note.textContent=job.notes_public;
+    noteW.appendChild(note);root.appendChild(noteW);
+  }
+
+  // Updated
+  if(job.updated_at){
+    var meta=document.createElement("span");meta.className="meta";meta.style.textAlign="center";
+    meta.textContent="Last updated: "+new Date(job.updated_at).toLocaleString();
+    root.appendChild(meta);
+  }
+
+  // Auto-refresh
+  var refresh=document.createElement("span");refresh.style.cssText="text-align:center;color:#333;font-size:10px";
+  refresh.textContent="Auto-refreshes every 60 seconds";
+  root.appendChild(refresh);
+}
+
+function showError(msg){
+  var root=document.getElementById("root");
+  var loading=document.getElementById("loading");
+  if(loading)loading.remove();
+  var err=document.createElement("div");err.className="error";
+  var h2=document.createElement("h2");h2.textContent="Not Found";
+  var p=document.createElement("p");p.textContent=msg||"This job status link is invalid or has expired.";
+  err.appendChild(h2);err.appendChild(p);root.appendChild(err);
+}
+
+function load(){
+  var token=getToken();
+  if(!token){showError("No job token provided. Check your link.");return}
+  fetch(SB_URL+"/rest/v1/job_public?token=eq."+token,{
+    method:"GET",
+    headers:{"apikey":SB_KEY,"Content-Type":"application/json"}
+  }).then(function(r){return r.json()}).then(function(rows){
+    if(!rows||rows.length===0){showError();return}
+    document.getElementById("root").innerHTML='<div class="logo"><h1>DRYDOCK</h1><p>Job Status</p></div>';
+    render(rows[0]);
+  }).catch(function(e){showError("Could not load job status. Try again later.")});
+}
+
+load();
+// Auto-refresh every 60s
+setInterval(function(){
+  var token=getToken();if(!token)return;
+  fetch(SB_URL+"/rest/v1/job_public?token=eq."+token,{
+    method:"GET",headers:{"apikey":SB_KEY,"Content-Type":"application/json"}
+  }).then(function(r){return r.json()}).then(function(rows){
+    if(rows&&rows.length>0){
+      document.getElementById("root").innerHTML='<div class="logo"><h1>DRYDOCK</h1><p>Job Status</p></div>';
+      render(rows[0]);
+    }
+  }).catch(function(){});
+},60000);
+</script>
+</body>
+</html>
