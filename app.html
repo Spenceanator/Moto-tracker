@@ -109,7 +109,7 @@ function renderNav(){
   if(a){var out=document.createElement("button");out.textContent="sign out";out.style.cssText="color:#444;font-size:10px;background:none;border:none;cursor:pointer;padding:4px 8px;font-family:var(--font);margin-left:auto";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="4.7.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="4.8.0";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -221,7 +221,30 @@ function pollCheck(){
         syncPull(function(){var el=document.getElementById("sync-dot");if(el){el.style.background="#22c55e"}})
       }
     }
-  }).catch(function(){})
+  }).catch(function(){});
+  fetchIntake(function(){R()});
+}
+// ============ INTAKE ============
+var _intakeItems=[];
+function fetchIntake(cb,force){
+  if(!getAuth()){if(cb)cb();return}
+  fetch(SB_URL+"/rest/v1/intake?status=eq.pending&order=created_at.desc",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(rows){
+    var prev=_intakeItems.length;_intakeItems=rows||[];if(force||_intakeItems.length!==prev){if(cb)cb()}
+  }).catch(function(){if(cb)cb()})
+}
+function acceptIntake(item){
+  data.jobs.push({id:mid(),customer:item.customer_name||"",customerContact:item.customer_contact||"",vehicleYear:item.vehicle_year||"",vehicleMake:item.vehicle_make||"",vehicleModel:item.vehicle_model||"",status:"intake",problem:item.problem||"",quoted:"",scheduledDate:item.preferred_date||"",laborSeconds:0,laborRate:"50",timerStart:null,tasks:[],notes:"Submitted via intake form",photo:null,createdAt:Date.now(),completedAt:null,deliveredAt:null});
+  save();
+  // Update intake row status
+  fetch(SB_URL+"/rest/v1/intake?id=eq."+item.id,{method:"PATCH",headers:sbHeaders(),body:JSON.stringify({status:"accepted"})}).catch(function(){});
+  _intakeItems=_intakeItems.filter(function(i){return i.id!==item.id});
+  R();flash("Job created from request");
+}
+function dismissIntake(item){
+  fetch(SB_URL+"/rest/v1/intake?id=eq."+item.id,{method:"PATCH",headers:sbHeaders(),body:JSON.stringify({status:"dismissed"})}).catch(function(){});
+  _intakeItems=_intakeItems.filter(function(i){return i.id!==item.id});
+  R();
 }
 function flash(msg){var el=document.createElement("div");el.textContent=msg||"Saved";Object.assign(el.style,{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 12px)",left:"50%",transform:"translateX(-50%)",background:"#22c55e",color:"#000",padding:"8px 20px",borderRadius:"8px",fontSize:"13px",fontWeight:"700",fontFamily:"var(--font)",zIndex:"9999",opacity:"1",transition:"opacity 0.3s"});document.body.appendChild(el);setTimeout(function(){el.style.opacity="0";setTimeout(function(){el.remove()},300)},1200)}
 function mid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
@@ -976,7 +999,7 @@ function rHome(){
   var nvb=h("div",{class:"nb"});
   var activeJobs=data.jobs.filter(function(j){return j.status!=="delivered"}).length;
   var readyCount=0;data.bikes.forEach(function(b){readyCount+=b.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}).length});data.jobs.forEach(function(j){if(j.status==="intake"||j.status==="in-progress")readyCount+=j.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}).length});
-  ["today","bikes","leads","jobs","sold","expenses"].forEach(function(t){var labels={today:"Today"+(readyCount?" ("+readyCount+")":""),bikes:"Bikes ("+data.bikes.length+")",leads:"Leads ("+data.leads.length+")",jobs:"Jobs"+(activeJobs?" ("+activeJobs+")":""),sold:"Sold ("+data.sold.length+")",expenses:"$"};
+  ["today","bikes","leads","jobs","sold","expenses"].forEach(function(t){var labels={today:"Today"+(readyCount?" ("+readyCount+")":""),bikes:"Bikes ("+data.bikes.length+")",leads:"Leads ("+data.leads.length+")",jobs:"Jobs"+(activeJobs?" ("+activeJobs+")":"")+(_intakeItems.length?" +"+_intakeItems.length:""),sold:"Sold ("+data.sold.length+")",expenses:"$"};
     nvb.append(h("button",{class:"nt"+(hTab===t?" a":""),onClick:function(){hTab=t;ui.addBike=0;ui.addLead=0;ui.addJob=0;ui.showPaste=0;ui.leadFilter=null;ui.jobFilter="active";ui.addExp=0;ui.addTrip=0;ui.scanLead=0;R()}},labels[t]))});root.append(nvb);
 
   if(hTab==="today"){
@@ -1174,6 +1197,26 @@ function rHome(){
     var jfOpts=[{key:"active",label:"Active",color:"#f59e0b"},{key:"all",label:"All",color:"#888"},{key:"delivered",label:"Delivered",color:"#555"}];
     jfOpts.forEach(function(o){var isOn=ui.jobFilter===o.key;var b=h("button",{class:"chip"+(isOn?" on":""),style:{color:isOn?o.color:"#555",borderColor:isOn?o.color:"#333",fontSize:"10px"},onClick:function(){ui.jobFilter=o.key;R()}},o.label);jfRow.append(b)});
     jList.append(jfRow);
+    // Incoming requests
+    if(_intakeItems.length>0){
+      var incW=h("div",{class:"fc g6",style:{padding:"12px",background:"rgba(34,197,94,0.04)",borderRadius:"10px",border:"1px solid rgba(34,197,94,0.15)"}});
+      incW.append(h("span",{style:{color:"#22c55e",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"Incoming Requests ("+_intakeItems.length+")"));
+      _intakeItems.forEach(function(item){
+        var vt=[item.vehicle_year,item.vehicle_make,item.vehicle_model].filter(Boolean).join(" ");
+        var card=h("div",{class:"fc g4",style:{padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:"8px",border:"1px solid #222"}});
+        var top=h("div",{class:"f ac jb"});
+        top.append(h("span",{style:{color:"#f5f5f5",fontSize:"13px",fontWeight:700}},item.customer_name||"Unknown"));
+        if(item.customer_contact)top.append(h("span",{style:{color:"#888",fontSize:"11px"}},item.customer_contact));
+        card.append(top);
+        if(vt)card.append(h("span",{style:{color:"#22d3ee",fontSize:"12px"}},vt));
+        if(item.problem)card.append(h("span",{style:{color:"#888",fontSize:"12px",lineHeight:1.4}},item.problem.slice(0,120)+(item.problem.length>120?"...":"")));
+        if(item.preferred_date)card.append(h("span",{style:{color:"#60a5fa",fontSize:"11px"}},"\u{1F4C5} Preferred: "+item.preferred_date));
+        if(item.created_at)card.append(h("span",{style:{color:"#555",fontSize:"10px"}},"Submitted "+new Date(item.created_at).toLocaleDateString()));
+        var btns=h("div",{class:"f g8",style:{marginTop:"4px"}});
+        btns.append(h("button",{class:"bp",style:{flex:1,fontSize:"12px",padding:"8px"},onClick:function(){acceptIntake(item)}},"Accept"));
+        btns.append(h("button",{class:"bs",style:{flex:1,justifyContent:"center",color:"#ef4444",borderColor:"rgba(239,68,68,0.3)"},onClick:function(){dismissIntake(item)}},"Dismiss"));
+        card.append(btns);incW.append(card)});
+      jList.append(incW)}
     // Filter jobs
     var filteredJobs=data.jobs;
     if(ui.jobFilter==="active")filteredJobs=data.jobs.filter(function(j){return j.status!=="delivered"});
@@ -1246,8 +1289,10 @@ function rHome(){
 function R(){var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
   if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());
   app.append(wrap)}
-R();renderNav();syncPull(function(){R();startPoll()});
-document.addEventListener("visibilitychange",function(){if(!document.hidden){pollCheck();startPoll()}});
+R();renderNav();syncPull(function(){R();startPoll();fetchIntake(function(){R()})});
+document.addEventListener("visibilitychange",function(){if(!document.hidden){pollCheck();startPoll();fetchIntake(function(){R()})}});
+// Poll intake every 30s
+setInterval(function(){fetchIntake(function(){R()})},30000);
 </script>
 </body>
 </html>

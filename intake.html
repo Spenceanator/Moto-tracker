@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a0a">
+<title>Drydock — Service Request</title>
+<style>
+  :root{--bg:#0a0a0a;--surface:rgba(255,255,255,0.03);--border:#222;--borderL:#333;--text:#e5e5e5;--dim:#888;--muted:#555;--amber:#f59e0b;--red:#ef4444;--green:#22c55e;--cyan:#22d3ee;--font:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace;--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px)}
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5;padding:var(--safe-top) 16px var(--safe-bottom);min-height:100dvh;max-width:480px;margin:0 auto;-webkit-font-smoothing:antialiased}
+  input,textarea{width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--borderL);border-radius:8px;color:var(--text);padding:12px 14px;font-size:14px;font-family:var(--font);outline:none;transition:border-color .15s}
+  input:focus,textarea:focus{border-color:var(--cyan)}
+  input::placeholder,textarea::placeholder{color:var(--muted)}
+  textarea{resize:vertical;line-height:1.5}
+  .wrap{padding:40px 0 60px;display:flex;flex-direction:column;gap:20px}
+  .logo{text-align:center}
+  .logo h1{font-size:28px;font-weight:800;color:var(--amber);letter-spacing:-0.5px}
+  .logo p{color:var(--muted);font-size:12px;margin-top:4px}
+  .form{display:flex;flex-direction:column;gap:12px}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1;min-width:0}
+  .row>.sm{flex:0 0 80px}
+  .lbl{color:var(--cyan);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:2px}
+  .btn{width:100%;background:var(--cyan);border:none;border-radius:8px;color:#000;padding:14px;font-weight:700;font-size:14px;font-family:var(--font);cursor:pointer;transition:opacity .15s}
+  .btn:active{opacity:0.8}
+  .btn:disabled{opacity:0.4;cursor:default}
+  .err{color:var(--red);font-size:12px;text-align:center;min-height:18px}
+  .success{text-align:center;padding:40px 20px}
+  .success h2{color:var(--green);font-size:20px;font-weight:700}
+  .success p{color:var(--dim);font-size:13px;margin-top:8px;line-height:1.6}
+  .note{color:var(--muted);font-size:11px;text-align:center;line-height:1.5}
+  @media(prefers-color-scheme:dark){:root{color-scheme:dark}}
+</style>
+</head>
+<body>
+<div class="wrap" id="main">
+  <div class="logo">
+    <h1>DRYDOCK</h1>
+    <p>Service Request</p>
+  </div>
+  <form class="form" id="form" onsubmit="event.preventDefault();doSubmit()">
+    <div>
+      <div class="lbl">Your Info</div>
+      <input type="text" id="name" placeholder="Your name" autocomplete="name">
+    </div>
+    <input type="tel" id="contact" placeholder="Phone or email" autocomplete="tel">
+    <div>
+      <div class="lbl">Vehicle</div>
+      <div class="row">
+        <input type="text" id="year" placeholder="Year" class="sm">
+        <input type="text" id="make" placeholder="Make">
+        <input type="text" id="model" placeholder="Model">
+      </div>
+    </div>
+    <div>
+      <div class="lbl">What do you need?</div>
+      <textarea id="problem" rows="4" placeholder="Describe the issue or what you need done..."></textarea>
+    </div>
+    <div>
+      <div class="lbl">Preferred Date (optional)</div>
+      <input type="date" id="prefdate">
+    </div>
+    <div class="err" id="err"></div>
+    <button type="submit" class="btn" id="submit">Submit Request</button>
+    <p class="note">We'll review your request and get back to you to confirm scheduling and pricing.</p>
+  </form>
+</div>
+<div class="wrap success" id="done" style="display:none">
+  <div class="logo"><h1>DRYDOCK</h1></div>
+  <h2>Request Submitted</h2>
+  <p>We've received your service request and will be in touch to confirm details, scheduling, and pricing.</p>
+  <button class="btn" style="margin-top:24px;background:#333;color:#e5e5e5" onclick="doReset()">Submit Another</button>
+</div>
+<script>
+var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
+var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
+
+function uid(){return Date.now().toString(36)+Math.random().toString(36).substr(2,6)}
+
+function doSubmit(){
+  var name=document.getElementById("name").value.trim();
+  var contact=document.getElementById("contact").value.trim();
+  var year=document.getElementById("year").value.trim();
+  var make=document.getElementById("make").value.trim();
+  var model=document.getElementById("model").value.trim();
+  var problem=document.getElementById("problem").value.trim();
+  var prefdate=document.getElementById("prefdate").value;
+  var err=document.getElementById("err");
+  var btn=document.getElementById("submit");
+  if(!name){err.textContent="Please enter your name";return}
+  if(!contact){err.textContent="Please enter a phone number or email";return}
+  if(!problem){err.textContent="Please describe what you need";return}
+  err.textContent="";btn.disabled=true;btn.textContent="Submitting...";
+  fetch(SB_URL+"/rest/v1/intake",{
+    method:"POST",
+    headers:{"apikey":SB_KEY,"Content-Type":"application/json","Prefer":"return=minimal"},
+    body:JSON.stringify({id:uid(),customer_name:name,customer_contact:contact,vehicle_year:year,vehicle_make:make,vehicle_model:model,problem:problem,preferred_date:prefdate||null,status:"pending"})
+  }).then(function(r){
+    if(!r.ok)throw new Error("Failed");
+    document.getElementById("main").style.display="none";
+    document.getElementById("done").style.display="flex";
+  }).catch(function(e){
+    err.textContent="Something went wrong. Try again or contact us directly.";
+    btn.disabled=false;btn.textContent="Submit Request";
+  });
+}
+function doReset(){
+  document.getElementById("main").style.display="flex";
+  document.getElementById("done").style.display="none";
+  document.getElementById("form").reset();
+  document.getElementById("submit").disabled=false;
+  document.getElementById("submit").textContent="Submit Request";
+  document.getElementById("err").textContent="";
+}
+</script>
+</body>
+</html>
