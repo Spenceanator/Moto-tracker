@@ -78,7 +78,8 @@
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="site-nav" style="position:fixed;top:0;left:0;right:0;height:28px;background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding:0 12px;gap:4px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace"></div>
+<div id="app" style="padding-top:28px"></div>
 <script>
 var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
 var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
@@ -87,6 +88,26 @@ function getAuth(){try{var s=JSON.parse(localStorage.getItem(AUTH_SK));if(s&&s.a
 function sbHeaders(){var a=getAuth();return{"apikey":SB_KEY,"Authorization":"Bearer "+(a?a.access_token:SB_KEY),"Content-Type":"application/json"}}
 // Auth gate
 if(!getAuth()){window.location.href="index.html"}
+
+// ============ ROLES & NAV ============
+var ROLE_MAP={"owner":true}; // default: any authenticated user is owner for now
+var PAGES={owner:["app","workspace"],employee:["app","workspace"],customer:["intake"]};
+function getRole(){var a=getAuth();if(!a)return null;return"owner"} // TODO: check against users table
+function canAccess(page){var r=getRole();if(!r)return false;return(PAGES[r]||[]).indexOf(page)>=0}
+function renderNav(){
+  var nav=document.getElementById("site-nav");if(!nav)return;
+  var a=getAuth();nav.innerHTML="";
+  var links=[{page:"app",label:"Drydock",href:"app.html"},{page:"workspace",label:"Workspace",href:"workspace.html"}];
+  links.forEach(function(l){
+    if(!canAccess(l.page))return;
+    var isCur=l.page==="app";
+    var el=document.createElement("a");el.href=l.href;el.textContent=l.label;
+    el.style.cssText="color:"+(isCur?"#f59e0b":"#555")+";font-size:11px;text-decoration:none;padding:4px 8px;border-radius:4px;font-family:var(--font);transition:color .15s";
+    el.onmouseenter=function(){if(!isCur)el.style.color="#888"};el.onmouseleave=function(){if(!isCur)el.style.color="#555"};
+    nav.appendChild(el);
+  });
+  if(a){var out=document.createElement("button");out.textContent="sign out";out.style.cssText="color:#444;font-size:10px;background:none;border:none;cursor:pointer;padding:4px 8px;font-family:var(--font);margin-left:auto";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
+}
 
 var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="4.7.0";
 var DT=[
@@ -1225,7 +1246,7 @@ function rHome(){
 function R(){var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
   if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());
   app.append(wrap)}
-R();syncPull(function(){R();startPoll()});
+R();renderNav();syncPull(function(){R();startPoll()});
 document.addEventListener("visibilitychange",function(){if(!document.hidden){pollCheck();startPoll()}});
 </script>
 </body>
