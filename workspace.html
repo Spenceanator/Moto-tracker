@@ -193,6 +193,7 @@ const DEFAULT_KEYS = {
   find: { key: "f", mod: "meta", label: "search" },
   drillIn: { key: "Enter", mod: "", label: "drill into node" },
   focus: { key: ".", mod: "", label: "focus mode" },
+  decompose: { key: "d", mod: "", label: "decompose" },
 };
 
 const modLabel = (mod) => { if (!mod) return ""; if (mod === "meta") return navigator.platform?.includes("Mac") ? "⌘+" : "ctrl+"; if (mod === "shift") return "shift+"; return mod + "+"; };
@@ -234,6 +235,15 @@ function Workspace() {
   const [remapTarget, setRemapTarget] = useState(null);
   const [legendVisible, setLegendVisible] = useState(true);
   const [colorPickerNodeId, setColorPickerNodeId] = useState(null);
+  const [editingConIdx, setEditingConIdx] = useState(null);
+  const [conLabelText, setConLabelText] = useState("");
+  const [decomposeOpen, setDecomposeOpen] = useState(false);
+  const [decomposeMode, setDecomposeMode] = useState("manual");
+  const [decomposeText, setDecomposeText] = useState("");
+  const [decomposeContext, setDecomposeContext] = useState("");
+  const [decomposeChat, setDecomposeChat] = useState([]);
+  const [decomposeLoading, setDecomposeLoading] = useState(false);
+  const [decomposeNodes, setDecomposeNodes] = useState([]);
   const [focusNodeId, setFocusNodeId] = useState(null);
   const [focusStart, setFocusStart] = useState(null);
   const [focusMicroStep, setFocusMicroStep] = useState("");
@@ -254,6 +264,8 @@ function Workspace() {
   const microRef = useRef(null);
   const intentionRef = useRef(null);
   const exitNoteRef = useRef(null);
+  const conLabelRef = useRef(null);
+  const decomposeRef = useRef(null);
 
   // Load
   useEffect(() => {
@@ -335,7 +347,7 @@ function Workspace() {
   const commitBlock = useCallback((nid) => { if (editingBlockReason && nid) updateTask(nid, editingBlockReason, { blockReason: blockReasonText.trim() }); setEditingBlockReason(null); setBlockReasonText(""); }, [editingBlockReason, blockReasonText, updateTask]);
 
   const quickChild = useCallback((pid) => { const p = getNode(pid); if (!p) return; setViewParentId(pid); setOffset({ x: 0, y: 0 }); setTimeout(() => { const ex = nodes.filter((n) => n.parentId === pid); addNode(pid, 60, 60 + ex.length * 90, p.colorIdx); }, 50); }, [getNode, nodes, addNode]);
-  const quickSibling = useCallback((nid) => { const nd = getNode(nid); if (!nd) return; const sibs = nodes.filter((n) => n.parentId === nd.parentId); let x = nd.x + 220, y = nd.y; const occ = sibs.map((s) => ({ x: s.x, y: s.y })); let t = 0; while (t < 20) { if (!occ.some((o) => Math.abs(o.x - x) < 200 && Math.abs(o.y - y) < 80)) break; y += 90; t++; } const n = addNode(nd.parentId, x, y, nd.colorIdx); setConnections((p) => [...p, { from: nid, to: n.id }]); }, [getNode, nodes, addNode]);
+  const quickSibling = useCallback((nid) => { const nd = getNode(nid); if (!nd) return; const sibs = nodes.filter((n) => n.parentId === nd.parentId); let x = nd.x + 220, y = nd.y; const occ = sibs.map((s) => ({ x: s.x, y: s.y })); let t = 0; while (t < 20) { if (!occ.some((o) => Math.abs(o.x - x) < 200 && Math.abs(o.y - y) < 80)) break; y += 90; t++; } const n = addNode(nd.parentId, x, y, nd.colorIdx); setConnections((p) => [...p, { from: nid, to: n.id, label: "" }]); }, [getNode, nodes, addNode]);
 
   // ============ FOCUS MODE ============
   const enterFocus = useCallback((nid) => {
@@ -377,7 +389,7 @@ function Workspace() {
 
   const handleCanvasDblClick = useCallback((e) => { if (e.target !== canvasRef.current && !e.target.classList.contains("ci")) return; const r = canvasRef.current.getBoundingClientRect(); const pn = viewParentId ? getNode(viewParentId) : null; addNode(viewParentId, e.clientX - r.left - offset.x, e.clientY - r.top - offset.y, pn?.colorIdx || 0); }, [offset, viewParentId, addNode, getNode]);
   const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setColorPickerNodeId(null); setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
-  const handleNodeMouseDown = useCallback((e, nid) => { if (e.button === 2) return; e.stopPropagation(); if (connectingFrom) { if (connectingFrom !== nid) { setConnections((p) => { const ex = p.some((c) => (c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom)); if (ex) return p.filter((c) => !((c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom))); return [...p, { from: connectingFrom, to: nid }]; }); } setConnectingFrom(null); return; } setColorPickerNodeId(null); setSelectedId(nid); const nd = nodes.find((n) => n.id === nid); if (!nd) return; setDragState({ id: nid, sx: e.clientX, sy: e.clientY, ox: nd.x, oy: nd.y }); }, [nodes, connectingFrom]);
+  const handleNodeMouseDown = useCallback((e, nid) => { if (e.button === 2) return; e.stopPropagation(); if (connectingFrom) { if (connectingFrom !== nid) { setConnections((p) => { const ex = p.some((c) => (c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom)); if (ex) return p.filter((c) => !((c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom))); return [...p, { from: connectingFrom, to: nid, label: "" }]; }); } setConnectingFrom(null); return; } setColorPickerNodeId(null); setSelectedId(nid); const nd = nodes.find((n) => n.id === nid); if (!nd) return; setDragState({ id: nid, sx: e.clientX, sy: e.clientY, ox: nd.x, oy: nd.y }); }, [nodes, connectingFrom]);
 
   useEffect(() => { const mv = (e) => { if (dragState) setNodes((p) => p.map((n) => n.id === dragState.id ? { ...n, x: dragState.ox + e.clientX - dragState.sx, y: dragState.oy + e.clientY - dragState.sy } : n)); if (isPanning && panStart) setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); }; const up = () => { setDragState(null); setIsPanning(false); setPanStart(null); }; window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up); return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); }; }, [dragState, isPanning, panStart]);
 
@@ -442,9 +454,9 @@ function Workspace() {
   useEffect(() => {
     const h = (e) => {
       if (remapTarget) return;
-      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId;
+      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId || decomposeOpen;
       if (matchBind(e, keyBindings.find)) { e.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }
-      if (e.key === "Escape") { if (focusNodeId) { exitFocus(true); } else if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
+      if (e.key === "Escape") { if (decomposeOpen) { setDecomposeOpen(false); } else if (focusNodeId) { exitFocus(true); } else if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
       if (!busy) {
         if (matchBind(e, keyBindings.goUp) && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
         if (e.key === "Backspace" && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
@@ -457,6 +469,7 @@ function Workspace() {
           if (matchBind(e, keyBindings.demote)) { e.preventDefault(); demoteNode(selectedId); }
           if (matchBind(e, keyBindings.focus)) { e.preventDefault(); enterFocus(selectedId); }
         }
+        if (matchBind(e, keyBindings.decompose) && !busy) { e.preventDefault(); setDecomposeOpen(true); setDecomposeMode("manual"); setDecomposeText(""); setDecomposeContext(""); setDecomposeChat([]); setDecomposeNodes([]); setTimeout(() => decomposeRef.current?.focus(), 100); }
         if (e.key === "?" && !busy) { e.preventDefault(); setRemapOpen(!remapOpen); }
       }
     };
@@ -484,7 +497,7 @@ function Workspace() {
     const r = [{ label: "new node", key: "dbl-click" }];
     if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.focus.label, key: fmtBind(keyBindings.focus) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
     if (viewParentId) r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) });
-    r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: "settings", key: "?" });
+    r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: keyBindings.decompose.label, key: fmtBind(keyBindings.decompose) }); r.push({ label: "settings", key: "?" });
     return r;
   }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen, focusNodeId]);
 
@@ -557,6 +570,7 @@ function Workspace() {
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {connectingFrom && <span style={{ color: "#f59e0b", fontSize: 11, marginRight: 4 }}>click to connect</span>}
           {viewParentId && <button onClick={() => { const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: "none", border: `1px solid ${vc ? vc.accent + "30" : "#1a1a1c"}`, color: vc?.text || "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>← back</button>}
+          <button onClick={() => { setDecomposeOpen(true); setDecomposeMode("manual"); setDecomposeText(""); setDecomposeContext(""); setDecomposeChat([]); setDecomposeNodes([]); setTimeout(() => decomposeRef.current?.focus(), 100); }} style={{ background: "none", border: `1px solid ${decomposeOpen ? "#f59e0b40" : "#1a1a1c"}`, color: decomposeOpen ? "#f59e0b" : "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>decompose</button>
           <button onClick={() => { setSearchOpen(!searchOpen); if (!searchOpen) setTimeout(() => searchRef.current?.focus(), 50); else setSearchQuery(""); }} style={{ background: "none", border: `1px solid ${searchOpen ? "#525252" : "#1a1a1c"}`, color: searchOpen ? "#e2e8f0" : "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>find</button>
           <button onClick={() => setOffset({ x: 0, y: 0 })} style={{ background: "none", border: "1px solid #1a1a1c", color: "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>center</button>
         </div>
@@ -585,8 +599,39 @@ function Workspace() {
       <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 80, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s", touchAction: "none" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown} onTouchStart={handleCanvasTouchStart}>
         <div className="ci" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `radial-gradient(circle, ${gridC} 1px, transparent 1px)`, backgroundSize: "40px 40px", backgroundPosition: `${offset.x % 40}px ${offset.y % 40}px`, pointerEvents: "none" }} />
         <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }}>
-          {visCon.map((c, i) => { const f = getCenter(c.from), t = getCenter(c.to); const lc = vc ? vc.accent + "30" : "#252528"; return (<g key={i}><line x1={f.x + offset.x} y1={f.y + offset.y} x2={t.x + offset.x} y2={t.y + offset.y} stroke={lc} strokeWidth="1.5" strokeDasharray="6,4" /><line x1={f.x + offset.x} y1={f.y + offset.y} x2={t.x + offset.x} y2={t.y + offset.y} stroke="transparent" strokeWidth="14" style={{ pointerEvents: "stroke", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); const o = visCon[i]; setConnections((p) => p.filter((x) => !(x.from === o.from && x.to === o.to))); }} onMouseEnter={(e) => { const s = e.target.previousSibling; if (s) s.setAttribute("stroke", "#ef4444"); }} onMouseLeave={(e) => { const s = e.target.previousSibling; if (s) s.setAttribute("stroke", lc); }} /></g>); })}
+          {visCon.map((c, ci) => { const f = getCenter(c.from), t = getCenter(c.to); const lc = vc ? vc.accent + "30" : "#252528"; const llc = vc ? vc.accent + "60" : "#404040";
+            const fx = f.x + offset.x, fy = f.y + offset.y, tx = t.x + offset.x, ty = t.y + offset.y;
+            const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+            const angle = Math.atan2(ty - fy, tx - fx);
+            const ax = tx - Math.cos(angle) * 12, ay = ty - Math.sin(angle) * 12;
+            const al = 8, aw = 4;
+            const p1x = tx - Math.cos(angle) * al + Math.sin(angle) * aw, p1y = ty - Math.sin(angle) * al - Math.cos(angle) * aw;
+            const p2x = tx - Math.cos(angle) * al - Math.sin(angle) * aw, p2y = ty - Math.sin(angle) * al + Math.cos(angle) * aw;
+            const isEditing = editingConIdx === ci;
+            return (<g key={ci}>
+              <line x1={fx} y1={fy} x2={ax} y2={ay} stroke={lc} strokeWidth="1.5" strokeDasharray="6,4" />
+              <polygon points={`${tx},${ty} ${p1x},${p1y} ${p2x},${p2y}`} fill={lc} />
+              {c.label && !isEditing && <text x={mx} y={my - 6} fill={llc} fontSize="9" fontFamily={F} textAnchor="middle" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setEditingConIdx(ci); setConLabelText(c.label); setTimeout(() => conLabelRef.current?.focus(), 50); }}>{c.label}</text>}
+              <line x1={fx} y1={fy} x2={tx} y2={ty} stroke="transparent" strokeWidth="14" style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                onClick={(e) => { e.stopPropagation(); if (e.shiftKey) { const o = visCon[ci]; setConnections((p) => p.filter((x) => !(x.from === o.from && x.to === o.to))); } else { setEditingConIdx(ci); setConLabelText(c.label || ""); setTimeout(() => conLabelRef.current?.focus(), 50); } }}
+                onMouseEnter={(e) => { const g = e.target.parentNode; const l = g.querySelector("line"); if (l) l.setAttribute("stroke", "#f59e0b50"); }}
+                onMouseLeave={(e) => { const g = e.target.parentNode; const l = g.querySelector("line"); if (l) l.setAttribute("stroke", lc); }} />
+            </g>); })}
         </svg>
+
+        {/* Connection label editor */}
+        {editingConIdx !== null && visCon[editingConIdx] && (() => {
+          const ec = visCon[editingConIdx]; const ef = getCenter(ec.from), et = getCenter(ec.to);
+          const emx = (ef.x + et.x) / 2 + offset.x, emy = (ef.y + et.y) / 2 + offset.y - 20;
+          return <div style={{ position: "absolute", left: emx - 80, top: emy - 14, zIndex: 60, display: "flex", gap: 4, alignItems: "center" }} onMouseDown={(e) => e.stopPropagation()}>
+            <input ref={conLabelRef} value={conLabelText} onChange={(e) => setConLabelText(e.target.value)} placeholder="label..." onKeyDown={(e) => {
+              if (e.key === "Enter") { setConnections((p) => p.map((x, xi) => { const ri = connections.indexOf(visCon[editingConIdx]); return xi === ri ? { ...x, label: conLabelText.trim() } : x; })); setEditingConIdx(null); }
+              if (e.key === "Escape") setEditingConIdx(null);
+            }} onBlur={() => { setConnections((p) => p.map((x, xi) => { const ri = connections.indexOf(visCon[editingConIdx]); return xi === ri ? { ...x, label: conLabelText.trim() } : x; })); setEditingConIdx(null); }}
+            style={{ background: "#111113", border: "1px solid #252528", borderRadius: 4, color: "#e2e8f0", fontSize: 10, fontFamily: F, padding: "3px 8px", width: 160, outline: "none" }} />
+            <button onClick={() => { const o = visCon[editingConIdx]; setConnections((p) => p.filter((x) => !(x.from === o.from && x.to === o.to))); setEditingConIdx(null); }} style={{ background: "none", border: "none", color: "#ef444460", fontSize: 12, cursor: "pointer", padding: "2px" }}>×</button>
+          </div>;
+        })()}
 
         {visibleNodes.map((node) => {
           const co = COLORS[node.colorIdx]; const isSel = selectedId === node.id; const isEd = editingId === node.id;
@@ -636,6 +681,149 @@ function Workspace() {
           );
         })}
       </div>
+
+      {/* Decompose Overlay */}
+      {decomposeOpen && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#0a0a0bee", zIndex: 400, display: "flex", fontFamily: F, overflow: "hidden" }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", maxWidth: 900, margin: "0 auto", padding: "20px", height: "100%" }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexShrink: 0 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ color: "#f59e0b", fontSize: 14, fontWeight: 700 }}>decompose</span>
+                <div style={{ display: "flex", gap: 2, background: "#111113", borderRadius: 4, padding: 2 }}>
+                  <button onClick={() => setDecomposeMode("manual")} style={{ background: decomposeMode === "manual" ? "#252528" : "none", border: "none", color: decomposeMode === "manual" ? "#e2e8f0" : "#525252", fontSize: 10, padding: "4px 10px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>manual</button>
+                  <button onClick={() => setDecomposeMode("claude")} style={{ background: decomposeMode === "claude" ? "#252528" : "none", border: "none", color: decomposeMode === "claude" ? "#e2e8f0" : "#525252", fontSize: 10, padding: "4px 10px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>claude</button>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {decomposeNodes.length > 0 && <button onClick={() => {
+                  const pn = viewParentId ? getNode(viewParentId) : null;
+                  const baseX = 60, baseY = 60;
+                  const newNodes = decomposeNodes.map((dn, i) => ({
+                    id: uid(), parentId: viewParentId, x: dn.x || (baseX + (i % 3) * 240), y: dn.y || (baseY + Math.floor(i / 3) * 160),
+                    title: dn.title || "", notes: dn.notes || "", colorIdx: dn.colorIdx !== undefined ? dn.colorIdx : (pn?.colorIdx || 0),
+                    collapsed: false, tasks: (dn.tasks || []).map((t) => ({ id: uid(), text: t.text || t, status: t.status || "ready", blockReason: t.blockReason || "", completedAt: null })), created: Date.now()
+                  }));
+                  setNodes((p) => [...p, ...newNodes]);
+                  // Wire connections from decompose
+                  const idMap = {}; decomposeNodes.forEach((dn, i) => { idMap[dn._tmpId || i] = newNodes[i].id; });
+                  const newCons = (decomposeNodes.reduce((acc, dn) => { if (dn._connections) dn._connections.forEach((c) => { if (idMap[c.to] !== undefined) acc.push({ from: idMap[dn._tmpId], to: idMap[c.to], label: c.label || "" }); }); return acc; }, []));
+                  if (newCons.length > 0) setConnections((p) => [...p, ...newCons]);
+                  setDecomposeOpen(false);
+                }} style={{ background: "#f59e0b20", border: "1px solid #f59e0b40", color: "#f59e0b", fontSize: 11, padding: "6px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>place {decomposeNodes.length} nodes</button>}
+                <button onClick={() => setDecomposeOpen(false)} style={{ background: "none", border: "1px solid #252528", color: "#525252", fontSize: 11, padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>cancel (esc)</button>
+              </div>
+            </div>
+
+            {/* Manual Mode */}
+            {decomposeMode === "manual" && (
+              <div style={{ flex: 1, display: "flex", gap: 16, overflow: "hidden" }}>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <span style={{ color: "#525252", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>paste ticket / doc</span>
+                  <textarea ref={decomposeRef} value={decomposeText} onChange={(e) => setDecomposeText(e.target.value)} placeholder="Paste your ticket, design doc, or describe the feature..." style={{ flex: 1, background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: 12, resize: "none", outline: "none", lineHeight: "1.6" }} />
+                  <button onClick={() => {
+                    const sel = window.getSelection().toString().trim();
+                    if (!sel) return;
+                    const tmpId = decomposeNodes.length;
+                    setDecomposeNodes((p) => [...p, { _tmpId: tmpId, title: "", notes: sel, colorIdx: 0, tasks: [], x: 60 + (tmpId % 3) * 240, y: 60 + Math.floor(tmpId / 3) * 160, _connections: [] }]);
+                  }} style={{ background: "#1e40af20", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 11, padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F, alignSelf: "flex-start" }}>selection → node</button>
+                </div>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, overflow: "hidden" }}>
+                  <span style={{ color: "#525252", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em" }}>nodes ({decomposeNodes.length})</span>
+                  <div style={{ flex: 1, overflowY: "auto" }}>
+                    {decomposeNodes.map((dn, i) => (
+                      <div key={i} style={{ padding: "10px 12px", background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, marginBottom: 8 }}>
+                        <input value={dn.title} onChange={(e) => { const v = e.target.value; setDecomposeNodes((p) => p.map((n, ni) => ni === i ? { ...n, title: v } : n)); }} placeholder="Node title..." style={{ background: "none", border: "none", outline: "none", color: "#e2e8f0", fontSize: 13, fontFamily: F, fontWeight: 600, width: "100%", padding: 0, marginBottom: 4 }} />
+                        <div style={{ color: "#888", fontSize: 10, lineHeight: "1.5", maxHeight: 60, overflow: "hidden" }}>{dn.notes.slice(0, 200)}{dn.notes.length > 200 ? "..." : ""}</div>
+                        <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+                          {(dn.tasks || []).map((t, ti) => <span key={ti} style={{ background: "#22c55e15", border: "1px solid #22c55e30", color: "#22c55e", fontSize: 9, padding: "1px 6px", borderRadius: 3 }}>{typeof t === "string" ? t : t.text}</span>)}
+                          <button onClick={() => { const text = prompt("Task:"); if (text && text.trim()) setDecomposeNodes((p) => p.map((n, ni) => ni === i ? { ...n, tasks: [...(n.tasks || []), { text: text.trim(), status: "ready", blockReason: "" }] } : n)); }} style={{ background: "none", border: "1px dashed #333", color: "#444", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>+ task</button>
+                        </div>
+                        <button onClick={() => setDecomposeNodes((p) => p.filter((_, ni) => ni !== i))} style={{ background: "none", border: "none", color: "#ef444440", fontSize: 10, cursor: "pointer", padding: "4px 0", fontFamily: F, marginTop: 4 }}>remove</button>
+                      </div>
+                    ))}
+                    {decomposeNodes.length === 0 && <div style={{ color: "#333", fontSize: 11, padding: 12, textAlign: "center" }}>Select text on the left and click "selection → node" to pull pieces out</div>}
+                  </div>
+                  <button onClick={() => { const tmpId = decomposeNodes.length; setDecomposeNodes((p) => [...p, { _tmpId: tmpId, title: "", notes: "", colorIdx: 0, tasks: [], x: 60 + (tmpId % 3) * 240, y: 60 + Math.floor(tmpId / 3) * 160, _connections: [] }]); }} style={{ background: "#252528", border: "1px solid #333", color: "#888", fontSize: 11, padding: "8px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>+ empty node</button>
+                </div>
+              </div>
+            )}
+
+            {/* Claude Mode */}
+            {decomposeMode === "claude" && (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, overflow: "hidden" }}>
+                {decomposeChat.length === 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea ref={decomposeRef} value={decomposeText} onChange={(e) => setDecomposeText(e.target.value)} placeholder="Paste the ticket, design doc, or describe what you're building..." rows={6} style={{ background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#e2e8f0", fontSize: 12, fontFamily: F, padding: 12, resize: "vertical", outline: "none", lineHeight: "1.6" }} />
+                    <input value={decomposeContext} onChange={(e) => setDecomposeContext(e.target.value)} placeholder="What do you already understand? (optional)" style={{ background: "#111113", border: "1px solid #1a1a1c", borderRadius: 6, color: "#888", fontSize: 11, fontFamily: F, padding: "8px 12px", outline: "none" }} />
+                  </div>
+                )}
+                <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {decomposeChat.map((msg, i) => (
+                    <div key={i} style={{ padding: "8px 12px", background: msg.role === "user" ? "#1a1a1c" : "#111113", borderRadius: 6, border: "1px solid #1a1a1c" }}>
+                      <span style={{ color: msg.role === "user" ? "#e2e8f0" : "#a855f7", fontSize: 10, fontWeight: 600 }}>{msg.role === "user" ? "you" : "claude"}</span>
+                      <div style={{ color: "#ccc", fontSize: 11, lineHeight: "1.6", marginTop: 4, whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                    </div>
+                  ))}
+                  {decomposeLoading && <div style={{ color: "#a855f760", fontSize: 11, padding: 8 }}>thinking...</div>}
+                </div>
+                {(() => {
+                  const apiKey = loadJSON("mototracker_data", {}).apiKey || "";
+                  const hasKey = !!apiKey;
+                  const sendToApi = (userMsg) => {
+                    if (!hasKey) return;
+                    const sysPrompt = `You are helping decompose a ticket/feature into a systems schematic — NOT a project plan. Think components in an architecture, data flow, dependencies. Output JSON when the user says "place" or when you have a clear schematic:
+{"nodes":[{"title":"short name","notes":"what this component does","tasks":[{"text":"task","status":"ready","blockReason":""}],"colorIdx":0}],"connections":[{"fromIdx":0,"toIdx":1,"label":"data flow label"}]}
+First task on the first component should be the smallest possible physical action (under 2 minutes). Blocked tasks need blockReason. Keep titles 2-5 words. Notes explain what the component does in the system. Until you output JSON, have a conversation — ask what's fuzzy, propose components, refine. Be concise.`;
+                    const msgs = [{ role: "user", content: userMsg }];
+                    const fullMsgs = decomposeChat.map((m) => ({ role: m.role === "you" ? "user" : m.role, content: m.content }));
+                    fullMsgs.push({ role: "user", content: userMsg });
+                    setDecomposeChat((p) => [...p, { role: "user", content: userMsg }]);
+                    setDecomposeLoading(true);
+                    fetch("https://api.anthropic.com/v1/messages", {
+                      method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+                      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2000, system: sysPrompt, messages: fullMsgs })
+                    }).then((r) => r.json()).then((d) => {
+                      const txt = d.content?.[0]?.text || "Error";
+                      setDecomposeChat((p) => [...p, { role: "assistant", content: txt }]);
+                      setDecomposeLoading(false);
+                      // Try parse JSON from response
+                      try {
+                        const jsonMatch = txt.match(/\{[\s\S]*"nodes"[\s\S]*\}/);
+                        if (jsonMatch) {
+                          const parsed = JSON.parse(jsonMatch[0]);
+                          if (parsed.nodes) {
+                            const dns = parsed.nodes.map((n, i) => ({
+                              _tmpId: i, title: n.title || "", notes: n.notes || "", colorIdx: n.colorIdx || 0,
+                              tasks: (n.tasks || []).map((t) => typeof t === "string" ? { text: t, status: "ready", blockReason: "" } : t),
+                              x: 60 + (i % 3) * 240, y: 60 + Math.floor(i / 3) * 160,
+                              _connections: (parsed.connections || []).filter((c) => c.fromIdx === i).map((c) => ({ to: c.toIdx, label: c.label || "" }))
+                            }));
+                            setDecomposeNodes(dns);
+                          }
+                        }
+                      } catch (e) { /* not JSON yet, conversation continues */ }
+                    }).catch((e) => { setDecomposeChat((p) => [...p, { role: "assistant", content: "Error: " + e.message }]); setDecomposeLoading(false); });
+                  };
+                  return (
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      {decomposeChat.length === 0 ? (
+                        <button onClick={() => { if (!decomposeText.trim()) return; const msg = decomposeText + (decomposeContext ? "\n\nContext I already have: " + decomposeContext : ""); sendToApi(msg); }} disabled={!hasKey || !decomposeText.trim() || decomposeLoading} style={{ flex: 1, background: hasKey ? "#a855f720" : "#1a1a1c", border: "1px solid " + (hasKey ? "#a855f740" : "#252528"), color: hasKey ? "#a855f7" : "#333", fontSize: 11, padding: "10px", borderRadius: 4, cursor: hasKey ? "pointer" : "default", fontFamily: F, opacity: (!hasKey || !decomposeText.trim()) ? 0.4 : 1 }}>{hasKey ? "send to claude" : "add API key in Drydock settings"}</button>
+                      ) : (
+                        <input id="decompose-followup" placeholder="Ask a question or say 'place' to generate nodes..." onKeyDown={(e) => { if (e.key === "Enter" && e.target.value.trim()) { sendToApi(e.target.value.trim()); e.target.value = ""; } }} style={{ flex: 1, background: "#111113", border: "1px solid #1a1a1c", borderRadius: 4, color: "#e2e8f0", fontSize: 11, fontFamily: F, padding: "8px 12px", outline: "none" }} />
+                      )}
+                    </div>
+                  );
+                })()}
+                {decomposeNodes.length > 0 && <div style={{ flexShrink: 0, padding: "8px 0", borderTop: "1px solid #1a1a1c" }}>
+                  <span style={{ color: "#22c55e", fontSize: 11 }}>{decomposeNodes.length} nodes ready to place</span>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>{decomposeNodes.map((dn, i) => <span key={i} style={{ background: "#22c55e10", border: "1px solid #22c55e30", color: "#22c55e", fontSize: 10, padding: "2px 8px", borderRadius: 3 }}>{dn.title || "untitled"}</span>)}</div>
+                </div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Focus Mode Overlay */}
       {focusNodeId && (() => {
