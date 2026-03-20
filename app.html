@@ -939,6 +939,26 @@ function rJobView(){
     save();if(job.shareToken)pushJobPublic(job);R();flash(s)}},s.replace("-"," "));statusBar.append(b)});
   root.append(statusBar);
 
+  // Progress photos (visible on main view)
+  if(!job.publicPhotos)job.publicPhotos=[];
+  var photoSec=h("div",{class:"fc g8"});
+  var photoHdr=h("div",{class:"f ac jb"});
+  photoHdr.append(h("span",{class:"lbl",style:{color:"#22d3ee"}},"Progress Photos"+(job.publicPhotos.length?" ("+job.publicPhotos.length+")":"")));
+  var addPhotoBtn=h("button",{class:"bs",style:{color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)",padding:"4px 10px",fontSize:"11px"},onClick:function(){var inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.multiple=true;inp.onchange=function(){if(!job.publicPhotos)job.publicPhotos=[];Array.from(inp.files).forEach(function(f){compressImg(f,600,function(b64){job.publicPhotos.push(b64);save();R()})})};inp.click()}});addPhotoBtn.append(ic("cam")," Add");photoHdr.append(addPhotoBtn);
+  photoSec.append(photoHdr);
+  if(job.publicPhotos.length>0){
+    var pgrid=h("div",{class:"f g8 fw"});
+    job.publicPhotos.forEach(function(p,i){
+      var pw=h("div",{style:{position:"relative",flexShrink:0}});
+      pw.append(h("img",{class:"photo-thumb",src:p}));
+      var rm=h("button",{style:{position:"absolute",top:"-4px",right:"-4px",width:"18px",height:"18px",borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",fontSize:"10px",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"},onClick:function(){job.publicPhotos.splice(i,1);save();R()}});rm.textContent="\u00d7";pw.append(rm);
+      pgrid.append(pw);
+    });
+    photoSec.append(pgrid);
+    if(job.shareToken)photoSec.append(h("span",{style:{color:"#444",fontSize:"10px"}},"Visible to customer on status page"));
+  }
+  root.append(photoSec);
+
   // Timer
   var isRunning=!!job.timerStart;var totalSecs=getJobSecs(job);var laborHrs=totalSecs/3600;
   var timerW=h("div",{class:"f ac jb",style:{padding:"12px 14px",background:isRunning?"rgba(96,165,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:"10px",border:isRunning?"1px solid rgba(96,165,250,0.3)":"1px solid #222"}});
@@ -1019,18 +1039,6 @@ function rJobView(){
     w.append(h("p",{style:{color:"#22d3ee",fontSize:"12px",marginTop:"8px"}},"Customer-visible notes"));
     w.append(h("p",{style:{color:"#555",fontSize:"11px"}},"Shown on the shared status page when you share a job link."));
     var pubTa=h("textarea",{rows:"6",placeholder:"Update for the customer...",style:{borderColor:"rgba(34,211,238,0.2)"},onInput:function(e){job.publicNotes=e.target.value;ss()}});pubTa.value=job.publicNotes||"";w.append(pubTa);
-    // Progress photos
-    w.append(h("p",{style:{color:"#22d3ee",fontSize:"12px",marginTop:"8px"}},"Progress Photos"));
-    if(!job.publicPhotos)job.publicPhotos=[];
-    var photoGrid=h("div",{class:"f g8 fw"});
-    job.publicPhotos.forEach(function(p,i){
-      var pw=h("div",{style:{position:"relative",flexShrink:0}});
-      pw.append(h("img",{class:"photo-thumb",src:p}));
-      var rm=h("button",{style:{position:"absolute",top:"-4px",right:"-4px",width:"18px",height:"18px",borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",fontSize:"10px",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"},onClick:function(){job.publicPhotos.splice(i,1);save();R()}});rm.textContent="\u00d7";pw.append(rm);
-      photoGrid.append(pw);
-    });
-    var addPhoto=h("div",{class:"photo-upload",onClick:function(){var inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=function(){if(inp.files[0]){compressImg(inp.files[0],600,function(b64){if(!job.publicPhotos)job.publicPhotos=[];job.publicPhotos.push(b64);save();R()})}};inp.click()}});addPhoto.innerHTML=I.cam;photoGrid.append(addPhoto);
-    w.append(photoGrid);
     if(job.shareToken)w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)",fontSize:"11px"},onClick:function(){pushJobPublic(job);flash("Status page updated")}},"Push update now"));
     w.append(h("span",{style:{color:"#555",fontSize:"11px"}},"Auto-saves"));root.append(w)}
 
