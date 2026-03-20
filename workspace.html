@@ -427,14 +427,16 @@ function Workspace() {
     e.stopPropagation();
     const t = e.touches[0]; const now = Date.now();
     const nd = nodes.find((n) => n.id === nid); if (!nd) return;
-    // Double-tap detection
     if (now - touchRef.current.lastTap < 350 && selectedId === nid) {
       setEditingId(nid); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50);
       touchRef.current.lastTap = 0; return;
     }
-    touchRef.current = { ...touchRef.current, lastTap: now, dragging: { id: nid, sx: t.clientX, sy: t.clientY, ox: nd.x, oy: nd.y, moved: false } };
+    const grp = groups.find((g) => g.nodeIds.includes(nid));
+    const dragIds = grp ? grp.nodeIds : [nid];
+    const origins = {}; dragIds.forEach((id) => { const n = nodes.find((x) => x.id === id); if (n) origins[id] = { x: n.x, y: n.y }; });
+    touchRef.current = { ...touchRef.current, lastTap: now, dragging: { id: nid, ids: dragIds, sx: t.clientX, sy: t.clientY, origins, moved: false } };
     setSelectedId(nid);
-  }, [nodes, selectedId]);
+  }, [nodes, selectedId, groups]);
   useEffect(() => {
     const mv = (e) => {
       if (e.touches.length !== 1) return;
@@ -443,7 +445,7 @@ function Workspace() {
         const dx = t.clientX - tr.dragging.sx, dy = t.clientY - tr.dragging.sy;
         if (Math.abs(dx) > 5 || Math.abs(dy) > 5 || tr.dragging.moved) {
           tr.dragging.moved = true; e.preventDefault();
-          setNodes((p) => p.map((n) => n.id === tr.dragging.id ? { ...n, x: tr.dragging.ox + dx, y: tr.dragging.oy + dy } : n));
+          setNodes((p) => p.map((n) => { if (tr.dragging.origins && tr.dragging.origins[n.id]) return { ...n, x: tr.dragging.origins[n.id].x + dx, y: tr.dragging.origins[n.id].y + dy }; return n; }));
         }
       } else if (tr.panning) {
         e.preventDefault();
@@ -703,24 +705,30 @@ function Workspace() {
         {groups.map((grp) => {
           const memberNodes = grp.nodeIds.map((id) => visibleNodes.find((n) => n.id === id)).filter(Boolean);
           if (memberNodes.length === 0) return null;
-          const pad = 20;
+          const pad = 24;
           const minX = Math.min(...memberNodes.map((n) => n.x)) - pad;
-          const minY = Math.min(...memberNodes.map((n) => n.y)) - pad - 20;
+          const minY = Math.min(...memberNodes.map((n) => n.y)) - pad - 28;
           const maxX = Math.max(...memberNodes.map((n) => n.x)) + 200 + pad;
-          const maxY = Math.max(...memberNodes.map((n) => n.y)) + 120 + pad;
+          const maxY = Math.max(...memberNodes.map((n) => n.y)) + 140 + pad;
+          const isDragging = dragState && grp.nodeIds.includes(dragState.id);
           return (
-            <div key={grp.id} style={{ position: "absolute", left: minX + offset.x, top: minY + offset.y, width: maxX - minX, height: maxY - minY, background: grp.color + "08", border: `1px solid ${grp.color}25`, borderRadius: 10, zIndex: 0, pointerEvents: "none" }}>
-              <div style={{ position: "absolute", top: 4, left: 8, display: "flex", gap: 6, alignItems: "center", pointerEvents: "auto" }}>
-                {editingGroupId === grp.id ? <input autoFocus value={grp.name} onChange={(e) => setGroups((p) => p.map((g) => g.id === grp.id ? { ...g, name: e.target.value } : g))} onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditingGroupId(null); }} onBlur={() => setEditingGroupId(null)} style={{ background: "none", border: "none", borderBottom: `1px solid ${grp.color}40`, outline: "none", color: grp.color, fontSize: 10, fontFamily: F, fontWeight: 700, padding: 0, width: 120 }} onMouseDown={(e) => e.stopPropagation()} />
-                : <span onClick={(e) => { e.stopPropagation(); setEditingGroupId(grp.id); }} style={{ color: grp.color + "80", fontSize: 10, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", cursor: "pointer" }}>{grp.name}</span>}
-                <button onClick={(e) => { e.stopPropagation(); setMultiSelect(new Set(grp.nodeIds)); }} onMouseDown={(e) => e.stopPropagation()} style={{ background: "none", border: "none", color: grp.color + "40", fontSize: 10, cursor: "pointer", fontFamily: F, pointerEvents: "auto" }}>⊡</button>
-                {groupConfirmDelete === grp.id ? <span style={{ display: "flex", gap: 4, alignItems: "center", pointerEvents: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                  <span style={{ color: "#ef4444", fontSize: 9 }}>delete group + nodes?</span>
-                  <button onClick={() => { const rm = new Set(grp.nodeIds); setNodes((p) => p.filter((n) => !rm.has(n.id))); setConnections((p) => p.filter((c) => !rm.has(c.from) && !rm.has(c.to))); setGroups((p) => p.filter((g) => g.id !== grp.id)); setGroupConfirmDelete(null); }} style={{ background: "#ef444420", border: "1px solid #ef444440", color: "#ef4444", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>yes</button>
+            <div key={grp.id} style={{ position: "absolute", left: minX + offset.x, top: minY + offset.y, width: maxX - minX, height: maxY - minY, background: grp.color + "0c", border: `2px solid ${isDragging ? grp.color + "60" : grp.color + "30"}`, borderRadius: 12, zIndex: 2, transition: isDragging ? "none" : "border-color 0.2s" }}>
+              {/* Draggable group header */}
+              <div onMouseDown={(e) => {
+                e.stopPropagation();
+                const origins = {}; grp.nodeIds.forEach((id) => { const n = nodes.find((x) => x.id === id); if (n) origins[id] = { x: n.x, y: n.y }; });
+                setDragState({ id: grp.nodeIds[0], ids: grp.nodeIds, sx: e.clientX, sy: e.clientY, origins });
+              }} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", cursor: "grab", borderBottom: `1px solid ${grp.color}15`, borderRadius: "10px 10px 0 0", background: grp.color + "08" }}>
+                <span style={{ color: grp.color + "40", fontSize: 11, cursor: "grab", userSelect: "none" }}>⠿</span>
+                {editingGroupId === grp.id ? <input autoFocus value={grp.name} onChange={(e) => setGroups((p) => p.map((g) => g.id === grp.id ? { ...g, name: e.target.value } : g))} onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditingGroupId(null); e.stopPropagation(); }} onBlur={() => setEditingGroupId(null)} style={{ background: "none", border: "none", borderBottom: `1px solid ${grp.color}40`, outline: "none", color: grp.color, fontSize: 11, fontFamily: F, fontWeight: 700, padding: 0, width: 120 }} onMouseDown={(e) => e.stopPropagation()} />
+                : <span onClick={(e) => { e.stopPropagation(); setEditingGroupId(grp.id); }} style={{ color: grp.color + "90", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", cursor: "pointer", flex: 1 }}>{grp.name}</span>}
+                <span style={{ color: grp.color + "40", fontSize: 9 }}>{memberNodes.length}</span>
+                {groupConfirmDelete === grp.id ? <span style={{ display: "flex", gap: 4, alignItems: "center" }} onMouseDown={(e) => e.stopPropagation()}>
+                  <button onClick={() => { const rm = new Set(grp.nodeIds); setNodes((p) => p.filter((n) => !rm.has(n.id))); setConnections((p) => p.filter((c) => !rm.has(c.from) && !rm.has(c.to))); setGroups((p) => p.filter((g) => g.id !== grp.id)); setGroupConfirmDelete(null); }} style={{ background: "#ef444420", border: "1px solid #ef444440", color: "#ef4444", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>delete all</button>
                   <button onClick={() => { setGroups((p) => p.filter((g) => g.id !== grp.id)); setGroupConfirmDelete(null); }} style={{ background: "none", border: "1px solid #333", color: "#888", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>ungroup</button>
-                  <button onClick={() => setGroupConfirmDelete(null)} style={{ background: "none", border: "none", color: "#555", fontSize: 10, cursor: "pointer" }}>cancel</button>
+                  <button onClick={() => setGroupConfirmDelete(null)} onMouseDown={(e) => e.stopPropagation()} style={{ background: "none", border: "none", color: "#555", fontSize: 10, cursor: "pointer" }}>cancel</button>
                 </span>
-                : <button onClick={(e) => { e.stopPropagation(); setGroupConfirmDelete(grp.id); }} onMouseDown={(e) => e.stopPropagation()} style={{ background: "none", border: "none", color: "#ef444430", fontSize: 10, cursor: "pointer", pointerEvents: "auto" }}>×</button>}
+                : <button onClick={(e) => { e.stopPropagation(); setGroupConfirmDelete(grp.id); }} onMouseDown={(e) => e.stopPropagation()} style={{ background: "none", border: "none", color: "#ef444430", fontSize: 11, cursor: "pointer" }}>×</button>}
               </div>
             </div>
           );
@@ -729,6 +737,7 @@ function Workspace() {
         {visibleNodes.map((node) => {
           const co = COLORS[node.colorIdx]; const isSel = selectedId === node.id; const isEd = editingId === node.id;
           const isMSel = multiSelect.has(node.id);
+          const isGrpDrag = dragState && dragState.origins && dragState.origins[node.id] && dragState.id !== node.id;
           const kids = childCount(node.id); const rc = readyCounts[node.id] || 0;
           const tasks = node.tasks || []; const hasTasks = tasks.length > 0;
           const isMatch = searchOpen && searchQuery && searchIds.has(node.id);
@@ -737,7 +746,7 @@ function Workspace() {
           const sorted = [...tasks.filter((t) => t.status === "ready"), ...tasks.filter((t) => t.status === "blocked"), ...tasks.filter((t) => t.status === "done")];
           return (
             <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onTouchStart={(e) => handleNodeTouchStart(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
-              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: dragState?.id === node.id ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : dragState?.id === node.id ? "grabbing" : "grab" }}>
+              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isGrpDrag ? co.accent + "60" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : isGrpDrag ? 40 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isGrpDrag ? `0 0 8px ${co.accent}20` : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: (dragState && dragState.origins && dragState.origins[node.id]) ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : (dragState && dragState.origins && dragState.origins[node.id]) ? "grabbing" : "grab" }}>
               <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: node.collapsed ? "none" : `1px solid ${co.border}30`, minHeight: 34 }}>
                 {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
                 {rc > 0 && <span style={{ background: SM.ready.color + "20", border: `1px solid ${SM.ready.color}40`, color: SM.ready.color, fontSize: 10, borderRadius: 3, padding: "1px 5px", fontFamily: F, flexShrink: 0 }}>{rc}</span>}
