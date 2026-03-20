@@ -195,7 +195,6 @@ const DEFAULT_KEYS = {
   drillIn: { key: "Enter", mod: "", label: "drill into node" },
   focus: { key: ".", mod: "", label: "focus mode" },
   decompose: { key: "d", mod: "", label: "decompose" },
-  group: { key: "g", mod: "", label: "group selected" },
 };
 
 const modLabel = (mod) => { if (!mod) return ""; if (mod === "meta") return navigator.platform?.includes("Mac") ? "⌘+" : "ctrl+"; if (mod === "shift") return "shift+"; return mod + "+"; };
@@ -247,10 +246,7 @@ function Workspace() {
   const [decomposeLoading, setDecomposeLoading] = useState(false);
   const [decomposeNodes, setDecomposeNodes] = useState([]);
   const [decomposeConfirmClose, setDecomposeConfirmClose] = useState(false);
-  const [groups, setGroups] = useState([]);
   const [multiSelect, setMultiSelect] = useState(new Set());
-  const [editingGroupId, setEditingGroupId] = useState(null);
-  const [groupConfirmDelete, setGroupConfirmDelete] = useState(null);
   const [focusNodeId, setFocusNodeId] = useState(null);
   const [focusStart, setFocusStart] = useState(null);
   const [focusMicroStep, setFocusMicroStep] = useState("");
@@ -282,7 +278,6 @@ function Workspace() {
         setNodes(data.nodes.map((n) => ({ ...n, sessions: n.sessions || [], tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
         setConnections(data.connections || []);
         if (data.focusSessions) setFocusSessions(data.focusSessions);
-        if (data.groups) setGroups(data.groups);
         if (data.intention) { setDailyIntention(data.intention.text || ""); setIntentionDate(data.intention.date || ""); }
         if (remote) { saveJSON(STORE, data); _wsLastPush = Date.now(); }
       }
@@ -305,7 +300,6 @@ function Workspace() {
         setNodes(remote.nodes.map((n) => ({ ...n, sessions: n.sessions || [], tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
         setConnections(remote.connections || []);
         if (remote.focusSessions) setFocusSessions(remote.focusSessions);
-        if (remote.groups) setGroups(remote.groups);
         if (remote.intention) { setDailyIntention(remote.intention.text || ""); setIntentionDate(remote.intention.date || ""); }
         saveJSON(STORE, remote);
       }
@@ -314,7 +308,7 @@ function Workspace() {
   }, []);
 
   // Save (local + cloud)
-  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, groups, focusSessions, intention: { text: dailyIntention, date: intentionDate }, _ts: Date.now() }; saveJSON(STORE, payload); wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, groups, focusSessions, dailyIntention, intentionDate, loaded]);
+  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, focusSessions, intention: { text: dailyIntention, date: intentionDate }, _ts: Date.now() }; saveJSON(STORE, payload); wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, focusSessions, dailyIntention, intentionDate, loaded]);
   useEffect(() => { if (loaded) { const t = setTimeout(() => saveJSON(KEYS_STORE, keyBindings), 300); return () => clearTimeout(t); } }, [keyBindings, loaded]);
 
   const visibleNodes = nodes.filter((n) => n.parentId === viewParentId);
@@ -334,7 +328,7 @@ function Workspace() {
   const getBreadcrumbs = useCallback(() => { const r = []; let c = viewParentId; while (c) { const n = nodes.find((x) => x.id === c); if (!n) break; r.unshift(n); c = n.parentId; } r.unshift({ id: null, title: "root" }); return r; }, [viewParentId, nodes]);
   const getAncestors = useCallback((id) => { const a = []; let c = nodes.find((n) => n.id === id)?.parentId; while (c) { const n = nodes.find((x) => x.id === c); if (!n) break; a.unshift(n); c = n.parentId; } return a; }, [nodes]);
   const allDescIds = useCallback((id) => { const r = [], s = [id]; while (s.length) { const c = s.pop(); nodes.filter((n) => n.parentId === c).forEach((k) => { r.push(k.id); s.push(k.id); }); } return r; }, [nodes]);
-  const searchResults = useMemo(() => { if (!searchQuery.trim()) return []; const q = searchQuery.toLowerCase(); const groupMatches = new Set(); groups.forEach((g) => { if (g.name.toLowerCase().includes(q)) g.nodeIds.forEach((id) => groupMatches.add(id)); }); return nodes.filter((n) => groupMatches.has(n.id) || n.title.toLowerCase().includes(q) || n.notes.toLowerCase().includes(q) || (n.tasks || []).some((t) => t.text.toLowerCase().includes(q))); }, [searchQuery, nodes, groups]);
+  const searchResults = useMemo(() => { if (!searchQuery.trim()) return []; const q = searchQuery.toLowerCase(); return nodes.filter((n) => n.title.toLowerCase().includes(q) || n.notes.toLowerCase().includes(q) || (n.tasks || []).some((t) => t.text.toLowerCase().includes(q))); }, [searchQuery, nodes]);
   const navigateToNode = useCallback((id) => { const n = nodes.find((x) => x.id === id); if (!n) return; setViewParentId(n.parentId); setSelectedId(n.id); if (canvasRef.current) { const r = canvasRef.current.getBoundingClientRect(); setOffset({ x: r.width / 2 - n.x - 100, y: r.height / 2 - n.y - 30 }); } }, [nodes]);
 
   const addNode = useCallback((pid, x, y, ci) => { const n = { id: uid(), parentId: pid, x, y, title: "", notes: "", colorIdx: ci, collapsed: false, tasks: [], created: Date.now() }; setNodes((p) => [...p, n]); setSelectedId(n.id); setEditingId(n.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); return n; }, []);
@@ -397,17 +391,15 @@ function Workspace() {
   const fmtTimer = (secs) => { const m = Math.floor(secs / 60); const s = secs % 60; return `${m}:${s < 10 ? "0" : ""}${s}`; };
 
   const handleCanvasDblClick = useCallback((e) => { if (e.target !== canvasRef.current && !e.target.classList.contains("ci")) return; const r = canvasRef.current.getBoundingClientRect(); const pn = viewParentId ? getNode(viewParentId) : null; addNode(viewParentId, e.clientX - r.left - offset.x, e.clientY - r.top - offset.y, pn?.colorIdx || 0); }, [offset, viewParentId, addNode, getNode]);
-  const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setColorPickerNodeId(null); setMultiSelect(new Set()); setGroupConfirmDelete(null); setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
+  const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setColorPickerNodeId(null); setMultiSelect(new Set()); setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
   const handleNodeMouseDown = useCallback((e, nid) => { if (e.button === 2) return; e.stopPropagation(); if (connectingFrom) { if (connectingFrom !== nid) { setConnections((p) => { const ex = p.some((c) => (c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom)); if (ex) return p.filter((c) => !((c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom))); return [...p, { from: connectingFrom, to: nid, label: "" }]; }); } setConnectingFrom(null); return; } setColorPickerNodeId(null);
     if (e.shiftKey) { setMultiSelect((p) => { const ns = new Set(p); if (ns.has(nid)) ns.delete(nid); else ns.add(nid); return ns; }); return; }
     if (!multiSelect.has(nid)) setMultiSelect(new Set());
     setSelectedId(nid); const nd = nodes.find((n) => n.id === nid); if (!nd) return;
-    // If node is in a group or multi-select, drag all members
-    const grp = groups.find((g) => g.nodeIds.includes(nid));
-    const dragIds = multiSelect.size > 1 && multiSelect.has(nid) ? [...multiSelect] : grp ? grp.nodeIds : [nid];
+    const dragIds = multiSelect.size > 1 && multiSelect.has(nid) ? [...multiSelect] : [nid];
     const origins = {}; dragIds.forEach((id) => { const n = nodes.find((x) => x.id === id); if (n) origins[id] = { x: n.x, y: n.y }; });
     setDragState({ id: nid, ids: dragIds, sx: e.clientX, sy: e.clientY, origins });
-  }, [nodes, connectingFrom, multiSelect, groups]);
+  }, [nodes, connectingFrom, multiSelect]);
 
   useEffect(() => { const mv = (e) => { if (dragState) { const ddx = e.clientX - dragState.sx, ddy = e.clientY - dragState.sy; setNodes((p) => p.map((n) => { if (dragState.origins && dragState.origins[n.id]) return { ...n, x: dragState.origins[n.id].x + ddx, y: dragState.origins[n.id].y + ddy }; return n; })); } if (isPanning && panStart) setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); }; const up = () => { setDragState(null); setIsPanning(false); setPanStart(null); }; window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up); return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); }; }, [dragState, isPanning, panStart]);
 
@@ -431,12 +423,11 @@ function Workspace() {
       setEditingId(nid); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50);
       touchRef.current.lastTap = 0; return;
     }
-    const grp = groups.find((g) => g.nodeIds.includes(nid));
-    const dragIds = grp ? grp.nodeIds : [nid];
+    const dragIds = [nid];
     const origins = {}; dragIds.forEach((id) => { const n = nodes.find((x) => x.id === id); if (n) origins[id] = { x: n.x, y: n.y }; });
     touchRef.current = { ...touchRef.current, lastTap: now, dragging: { id: nid, ids: dragIds, sx: t.clientX, sy: t.clientY, origins, moved: false } };
     setSelectedId(nid);
-  }, [nodes, selectedId, groups]);
+  }, [nodes, selectedId]);
   useEffect(() => {
     const mv = (e) => {
       if (e.touches.length !== 1) return;
@@ -506,10 +497,6 @@ function Workspace() {
           if (matchBind(e, keyBindings.focus)) { e.preventDefault(); enterFocus(selectedId); }
         }
         if (matchBind(e, keyBindings.decompose) && !busy) { e.preventDefault(); setDecomposeOpen(true); setDecomposeMode("manual"); setDecomposeText(""); setDecomposeContext(""); setDecomposeChat([]); setDecomposeNodes([]); setTimeout(() => decomposeRef.current?.focus(), 100); }
-        if (matchBind(e, keyBindings.group) && !busy) { e.preventDefault();
-          const ids = multiSelect.size > 1 ? [...multiSelect] : selectedId ? [selectedId] : [];
-          if (ids.length > 0) { const name = prompt("Group name:"); if (name && name.trim()) { const existing = groups.find((g) => ids.every((id) => g.nodeIds.includes(id))); if (existing) { setGroups((p) => p.map((g) => g.id === existing.id ? { ...g, name: name.trim() } : g)); } else { setGroups((p) => [...p, { id: uid(), name: name.trim(), nodeIds: ids, color: COLORS[nodes.find((n) => n.id === ids[0])?.colorIdx || 0].accent }]); } setMultiSelect(new Set()); } }
-        }
         if (e.key === "?" && !busy) { e.preventDefault(); setRemapOpen(!remapOpen); }
         // Arrow key navigation
         if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key) && !busy) {
@@ -562,10 +549,9 @@ function Workspace() {
     const r = [{ label: "new node", key: "dbl-click" }, { label: "navigate", key: "arrows" }];
     if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.focus.label, key: fmtBind(keyBindings.focus) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
     if (viewParentId) r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) });
-    if (selectedId || multiSelect.size > 0) r.push({ label: keyBindings.group.label, key: fmtBind(keyBindings.group) });
     r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: keyBindings.decompose.label, key: fmtBind(keyBindings.decompose) }); r.push({ label: "settings", key: "?" });
     return r;
-  }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen, focusNodeId, multiSelect]);
+  }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen, focusNodeId]);
 
   if (!loaded) return <div style={{ height: "100vh", background: "#0a0a0b", display: "flex", alignItems: "center", justifyContent: "center", color: "#525252", fontFamily: F, fontSize: 13 }}>loading...</div>;
 
@@ -701,43 +687,10 @@ function Workspace() {
           </div>;
         })()}
 
-        {/* Group backgrounds */}
-        {groups.map((grp) => {
-          const memberNodes = grp.nodeIds.map((id) => visibleNodes.find((n) => n.id === id)).filter(Boolean);
-          if (memberNodes.length === 0) return null;
-          const pad = 24;
-          const minX = Math.min(...memberNodes.map((n) => n.x)) - pad;
-          const minY = Math.min(...memberNodes.map((n) => n.y)) - pad - 28;
-          const maxX = Math.max(...memberNodes.map((n) => n.x)) + 200 + pad;
-          const maxY = Math.max(...memberNodes.map((n) => n.y)) + 140 + pad;
-          const isDragging = dragState && grp.nodeIds.includes(dragState.id);
-          return (
-            <div key={grp.id} style={{ position: "absolute", left: minX + offset.x, top: minY + offset.y, width: maxX - minX, height: maxY - minY, background: grp.color + "0c", border: `2px solid ${isDragging ? grp.color + "60" : grp.color + "30"}`, borderRadius: 12, zIndex: 2, transition: isDragging ? "none" : "border-color 0.2s" }}>
-              {/* Draggable group header */}
-              <div onMouseDown={(e) => {
-                e.stopPropagation();
-                const origins = {}; grp.nodeIds.forEach((id) => { const n = nodes.find((x) => x.id === id); if (n) origins[id] = { x: n.x, y: n.y }; });
-                setDragState({ id: grp.nodeIds[0], ids: grp.nodeIds, sx: e.clientX, sy: e.clientY, origins });
-              }} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", cursor: "grab", borderBottom: `1px solid ${grp.color}15`, borderRadius: "10px 10px 0 0", background: grp.color + "08" }}>
-                <span style={{ color: grp.color + "40", fontSize: 11, cursor: "grab", userSelect: "none" }}>⠿</span>
-                {editingGroupId === grp.id ? <input autoFocus value={grp.name} onChange={(e) => setGroups((p) => p.map((g) => g.id === grp.id ? { ...g, name: e.target.value } : g))} onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditingGroupId(null); e.stopPropagation(); }} onBlur={() => setEditingGroupId(null)} style={{ background: "none", border: "none", borderBottom: `1px solid ${grp.color}40`, outline: "none", color: grp.color, fontSize: 11, fontFamily: F, fontWeight: 700, padding: 0, width: 120 }} onMouseDown={(e) => e.stopPropagation()} />
-                : <span onClick={(e) => { e.stopPropagation(); setEditingGroupId(grp.id); }} style={{ color: grp.color + "90", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", cursor: "pointer", flex: 1 }}>{grp.name}</span>}
-                <span style={{ color: grp.color + "40", fontSize: 9 }}>{memberNodes.length}</span>
-                {groupConfirmDelete === grp.id ? <span style={{ display: "flex", gap: 4, alignItems: "center" }} onMouseDown={(e) => e.stopPropagation()}>
-                  <button onClick={() => { const rm = new Set(grp.nodeIds); setNodes((p) => p.filter((n) => !rm.has(n.id))); setConnections((p) => p.filter((c) => !rm.has(c.from) && !rm.has(c.to))); setGroups((p) => p.filter((g) => g.id !== grp.id)); setGroupConfirmDelete(null); }} style={{ background: "#ef444420", border: "1px solid #ef444440", color: "#ef4444", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>delete all</button>
-                  <button onClick={() => { setGroups((p) => p.filter((g) => g.id !== grp.id)); setGroupConfirmDelete(null); }} style={{ background: "none", border: "1px solid #333", color: "#888", fontSize: 9, padding: "1px 6px", borderRadius: 3, cursor: "pointer", fontFamily: F }}>ungroup</button>
-                  <button onClick={() => setGroupConfirmDelete(null)} onMouseDown={(e) => e.stopPropagation()} style={{ background: "none", border: "none", color: "#555", fontSize: 10, cursor: "pointer" }}>cancel</button>
-                </span>
-                : <button onClick={(e) => { e.stopPropagation(); setGroupConfirmDelete(grp.id); }} onMouseDown={(e) => e.stopPropagation()} style={{ background: "none", border: "none", color: "#ef444430", fontSize: 11, cursor: "pointer" }}>×</button>}
-              </div>
-            </div>
-          );
-        })}
-
         {visibleNodes.map((node) => {
           const co = COLORS[node.colorIdx]; const isSel = selectedId === node.id; const isEd = editingId === node.id;
           const isMSel = multiSelect.has(node.id);
-          const isGrpDrag = dragState && dragState.origins && dragState.origins[node.id] && dragState.id !== node.id;
+          const isMultiDrag = dragState && dragState.origins && dragState.origins[node.id] && dragState.id !== node.id;
           const kids = childCount(node.id); const rc = readyCounts[node.id] || 0;
           const tasks = node.tasks || []; const hasTasks = tasks.length > 0;
           const isMatch = searchOpen && searchQuery && searchIds.has(node.id);
@@ -746,7 +699,7 @@ function Workspace() {
           const sorted = [...tasks.filter((t) => t.status === "ready"), ...tasks.filter((t) => t.status === "blocked"), ...tasks.filter((t) => t.status === "done")];
           return (
             <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onTouchStart={(e) => handleNodeTouchStart(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
-              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isGrpDrag ? co.accent + "60" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : isGrpDrag ? 40 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isGrpDrag ? `0 0 8px ${co.accent}20` : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: (dragState && dragState.origins && dragState.origins[node.id]) ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : (dragState && dragState.origins && dragState.origins[node.id]) ? "grabbing" : "grab" }}>
+              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isMultiDrag ? co.accent + "60" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : isMultiDrag ? 40 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isMultiDrag ? `0 0 8px ${co.accent}20` : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: (dragState && dragState.origins && dragState.origins[node.id]) ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : (dragState && dragState.origins && dragState.origins[node.id]) ? "grabbing" : "grab" }}>
               <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: node.collapsed ? "none" : `1px solid ${co.border}30`, minHeight: 34 }}>
                 {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
                 {rc > 0 && <span style={{ background: SM.ready.color + "20", border: `1px solid ${SM.ready.color}40`, color: SM.ready.color, fontSize: 10, borderRadius: 3, padding: "1px 5px", fontFamily: F, flexShrink: 0 }}>{rc}</span>}
