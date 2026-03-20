@@ -471,7 +471,8 @@ function Workspace() {
   useEffect(() => {
     const h = (e) => {
       if (remapTarget) return;
-      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId || decomposeOpen || editingConIdx !== null;
+      const ae = document.activeElement; const isTyping = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.contentEditable === "true");
+      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId || decomposeOpen || editingConIdx !== null || isTyping;
       if (matchBind(e, keyBindings.find)) { e.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }
       if (e.key === "Escape") { if (editingConIdx !== null) { setEditingConIdx(null); } else if (decomposeOpen) { setDecomposeOpen(false); } else if (focusNodeId) { exitFocus(true); } else if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
       if (!busy) {
