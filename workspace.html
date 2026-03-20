@@ -246,6 +246,7 @@ function Workspace() {
   const [decomposeChat, setDecomposeChat] = useState([]);
   const [decomposeLoading, setDecomposeLoading] = useState(false);
   const [decomposeNodes, setDecomposeNodes] = useState([]);
+  const [decomposeConfirmClose, setDecomposeConfirmClose] = useState(false);
   const [groups, setGroups] = useState([]);
   const [multiSelect, setMultiSelect] = useState(new Set());
   const [editingGroupId, setEditingGroupId] = useState(null);
@@ -474,7 +475,22 @@ function Workspace() {
       const ae = document.activeElement; const isTyping = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.contentEditable === "true");
       const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId || decomposeOpen || editingConIdx !== null || isTyping;
       if (matchBind(e, keyBindings.find)) { e.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }
-      if (e.key === "Escape") { if (editingConIdx !== null) { setEditingConIdx(null); } else if (decomposeOpen) { setDecomposeOpen(false); } else if (focusNodeId) { exitFocus(true); } else if (remapOpen) setRemapOpen(false); else if (editingBlockReason) commitBlock(null); else if (editingTaskId) commitEditTask(null); else if (taskInputNodeId) stopAddTask(); else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); } else if (editingId) { setEditingId(null); setEditingField(null); } }
+      if (e.key === "Escape") {
+        if (editingConIdx !== null) { setEditingConIdx(null); }
+        else if (decomposeOpen) {
+          e.preventDefault(); e.stopPropagation();
+          const hasWork = decomposeNodes.length > 0 || decomposeText.trim().length > 0 || decomposeChat.length > 0;
+          if (hasWork && !decomposeConfirmClose) { setDecomposeConfirmClose(true); }
+          else { setDecomposeOpen(false); setDecomposeConfirmClose(false); }
+        }
+        else if (focusNodeId) { exitFocus(true); }
+        else if (remapOpen) setRemapOpen(false);
+        else if (editingBlockReason) commitBlock(null);
+        else if (editingTaskId) commitEditTask(null);
+        else if (taskInputNodeId) stopAddTask();
+        else if (searchOpen) { setSearchOpen(false); setSearchQuery(""); }
+        else if (editingId) { setEditingId(null); setEditingField(null); }
+      }
       if (!busy) {
         if (matchBind(e, keyBindings.goUp) && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
         if (e.key === "Backspace" && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
@@ -521,7 +537,7 @@ function Workspace() {
       }
     };
     window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
-  }, [editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, getNode, selectedId, quickSibling, quickChild, nodes, startAddTask, stopAddTask, commitEditTask, commitBlock, promoteNode, demoteNode, keyBindings, remapOpen, remapTarget, focusNodeId, enterFocus, exitFocus]);
+  }, [editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, getNode, selectedId, quickSibling, quickChild, nodes, startAddTask, stopAddTask, commitEditTask, commitBlock, promoteNode, demoteNode, keyBindings, remapOpen, remapTarget, focusNodeId, enterFocus, exitFocus, decomposeOpen, decomposeConfirmClose, decomposeNodes, decomposeText, decomposeChat]);
 
   const getCenter = useCallback((id) => { const n = nodes.find((x) => x.id === id); return n ? { x: n.x + 100, y: n.y + 28 } : { x: 0, y: 0 }; }, [nodes]);
   const visIds = new Set(visibleNodes.map((n) => n.id));
@@ -762,7 +778,7 @@ function Workspace() {
 
       {/* Decompose Overlay */}
       {decomposeOpen && (
-        <div style={{ position: "fixed", top: 40, left: 0, right: 0, bottom: 0, background: "#0a0a0bf0", zIndex: 400, display: "flex", fontFamily: F, overflow: "hidden" }}>
+        <div tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); const hasWork = decomposeNodes.length > 0 || decomposeText.trim().length > 0 || decomposeChat.length > 0; if (hasWork && !decomposeConfirmClose) { setDecomposeConfirmClose(true); } else { setDecomposeOpen(false); setDecomposeConfirmClose(false); } } }} style={{ position: "fixed", top: 40, left: 0, right: 0, bottom: 0, background: "#0a0a0bf0", zIndex: 400, display: "flex", fontFamily: F, overflow: "hidden", outline: "none" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", maxWidth: 900, margin: "0 auto", padding: "12px 16px", height: "100%" }}>
             {/* Header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexShrink: 0 }}>
@@ -787,10 +803,21 @@ function Workspace() {
                   const idMap = {}; decomposeNodes.forEach((dn, i) => { idMap[dn._tmpId || i] = newNodes[i].id; });
                   const newCons = (decomposeNodes.reduce((acc, dn) => { if (dn._connections) dn._connections.forEach((c) => { if (idMap[c.to] !== undefined) acc.push({ from: idMap[dn._tmpId], to: idMap[c.to], label: c.label || "" }); }); return acc; }, []));
                   if (newCons.length > 0) setConnections((p) => [...p, ...newCons]);
-                  setDecomposeOpen(false);
+                  setDecomposeOpen(false); setDecomposeConfirmClose(false);
                 }} style={{ background: "#f59e0b20", border: "1px solid #f59e0b40", color: "#f59e0b", fontSize: 11, padding: "6px 16px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>place {decomposeNodes.length} nodes on canvas</button>}
-                <button onClick={() => setDecomposeOpen(false)} style={{ background: "none", border: "1px solid #252528", color: "#525252", fontSize: 11, padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>cancel (esc)</button>
+                <button onClick={() => {
+                  const hasWork = decomposeNodes.length > 0 || decomposeText.trim().length > 0 || decomposeChat.length > 0;
+                  if (hasWork && !decomposeConfirmClose) { setDecomposeConfirmClose(true); }
+                  else { setDecomposeOpen(false); setDecomposeConfirmClose(false); }
+                }} style={{ background: "none", border: "1px solid #252528", color: "#525252", fontSize: 11, padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>cancel (esc)</button>
               </div>
+              {decomposeConfirmClose && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 12px", background: "#ef444410", border: "1px solid #ef444430", borderRadius: 6 }}>
+                  <span style={{ color: "#ef4444", fontSize: 11, flex: 1 }}>Discard decompose work?</span>
+                  <button onClick={() => { setDecomposeOpen(false); setDecomposeConfirmClose(false); }} style={{ background: "#ef444420", border: "1px solid #ef444440", color: "#ef4444", fontSize: 11, padding: "4px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>discard</button>
+                  <button onClick={() => setDecomposeConfirmClose(false)} style={{ background: "none", border: "1px solid #333", color: "#888", fontSize: 11, padding: "4px 12px", borderRadius: 4, cursor: "pointer", fontFamily: F }}>keep working</button>
+                </div>
+              )}
             </div>
 
             {/* Manual Mode */}
