@@ -492,6 +492,31 @@ function Workspace() {
           if (ids.length > 0) { const name = prompt("Group name:"); if (name && name.trim()) { const existing = groups.find((g) => ids.every((id) => g.nodeIds.includes(id))); if (existing) { setGroups((p) => p.map((g) => g.id === existing.id ? { ...g, name: name.trim() } : g)); } else { setGroups((p) => [...p, { id: uid(), name: name.trim(), nodeIds: ids, color: COLORS[nodes.find((n) => n.id === ids[0])?.colorIdx || 0].accent }]); } setMultiSelect(new Set()); } }
         }
         if (e.key === "?" && !busy) { e.preventDefault(); setRemapOpen(!remapOpen); }
+        // Arrow key navigation
+        if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key) && !busy) {
+          e.preventDefault();
+          const vis = nodes.filter((n) => n.parentId === viewParentId);
+          if (vis.length === 0) return;
+          if (!selectedId) { const sorted = [...vis].sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(sorted[0].id); return; }
+          const cur = vis.find((n) => n.id === selectedId);
+          if (!cur) { setSelectedId(vis[0].id); return; }
+          const cx = cur.x + 90, cy = cur.y + 40;
+          const dirs = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+          const [dx, dy] = dirs[e.key];
+          let best = null, bestScore = Infinity;
+          vis.forEach((n) => {
+            if (n.id === cur.id) return;
+            const nx = n.x + 90, ny = n.y + 40;
+            const ddx = nx - cx, ddy = ny - cy;
+            const dot = ddx * dx + ddy * dy;
+            if (dot <= 0) return;
+            const cross = Math.abs(ddx * dy - ddy * dx);
+            const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+            const score = dist + cross * 2;
+            if (score < bestScore) { bestScore = score; best = n; }
+          });
+          if (best) { setSelectedId(best.id); setMultiSelect(new Set()); }
+        }
       }
     };
     window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
@@ -515,7 +540,7 @@ function Workspace() {
       if (taskInputNodeId) r.push({ label: "add & continue", key: "enter" }, { label: "done adding", key: "empty enter" });
       return r;
     }
-    const r = [{ label: "new node", key: "dbl-click" }];
+    const r = [{ label: "new node", key: "dbl-click" }, { label: "navigate", key: "arrows" }];
     if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.focus.label, key: fmtBind(keyBindings.focus) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
     if (viewParentId) r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) });
     if (selectedId || multiSelect.size > 0) r.push({ label: keyBindings.group.label, key: fmtBind(keyBindings.group) });
