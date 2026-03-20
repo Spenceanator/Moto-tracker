@@ -20,6 +20,7 @@
   ::-webkit-scrollbar-thumb:hover { background: #404040; }
   ::selection { background: #3b82f640; color: #e2e8f0; }
   input::placeholder, textarea::placeholder { opacity: 0.5; }
+  @keyframes flowDash { to { stroke-dashoffset: -20; } }
 </style>
 </head>
 <body>
@@ -608,11 +609,11 @@ function Workspace() {
             const tipX = tx - ux * 2, tipY = ty - uy * 2;
             const p1x = tipX - ux * aLen + uy * aW, p1y = tipY - uy * aLen - ux * aW;
             const p2x = tipX - ux * aLen - uy * aW, p2y = tipY - uy * aLen + ux * aW;
-            const lineEndX = tipX - ux * aLen, lineEndY = tipY - uy * aLen;
             const isEditing = editingConIdx === ci;
             return (<g key={ci}>
+              <line x1={fx} y1={fy} x2={tx} y2={ty} stroke={lc} strokeWidth="2" strokeOpacity="0.3" />
+              <line x1={fx} y1={fy} x2={tx} y2={ty} stroke={lc} strokeWidth="2.5" strokeDasharray="8,12" style={{ animation: "flowDash 0.8s linear infinite" }} />
               <circle cx={fx} cy={fy} r="5" fill={lc} stroke="none" />
-              <line x1={fx} y1={fy} x2={lineEndX} y2={lineEndY} stroke={lc} strokeWidth="2.5" strokeLinecap="round" />
               <path d={`M${tipX},${tipY}L${p1x},${p1y}L${p2x},${p2y}Z`} fill={lc} stroke="none" />
               {c.label && !isEditing && <><rect x={mx - (c.label.length * 3.2) - 6} y={my - 17} width={(c.label.length * 6.4) + 12} height={16} rx="4" fill="#0a0a0be0" stroke={lc} strokeWidth="0.5" />
                 <text x={mx} y={my - 6} fill={llc} fontSize="10" fontFamily={F} textAnchor="middle" fontWeight="600" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setEditingConIdx(ci); setConLabelText(c.label); setTimeout(() => conLabelRef.current?.focus(), 50); }}>{c.label}</text></>}
