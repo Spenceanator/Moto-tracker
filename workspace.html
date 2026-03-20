@@ -675,7 +675,7 @@ function Workspace() {
       {/* Intention in top bar */}
       {dailyIntention && intentionDate === todayStr && !focusNodeId && (
         <div style={{ position: "fixed", top: 80, left: panelW, right: 0, display: "flex", justifyContent: "center", zIndex: 99, pointerEvents: "none" }}>
-          <div style={{ background: "#0a0a0bc0", border: "1px solid #f59e0b20", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "4px 16px", pointerEvents: "auto" }}>
+          <div style={{ background: "#0a0a0bc0", border: "1px solid #f59e0b20", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "4px 16px", pointerEvents: "auto", cursor: "pointer" }} onClick={() => setShowIntentionPrompt(true)}>
             <span style={{ color: "#f59e0b80", fontSize: 11 }}>{dailyIntention}</span>
           </div>
         </div>
