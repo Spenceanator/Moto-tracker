@@ -637,11 +637,13 @@ function Workspace() {
             if (n.id === cur.id) return;
             const nx = n.x + 90, ny = n.y + 40;
             const ddx = nx - cx, ddy = ny - cy;
-            const dot = ddx * dx + ddy * dy;
-            if (dot <= 0) return;
-            const cross = Math.abs(ddx * dy - ddy * dx);
             const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-            const score = dist + cross * 2;
+            if (dist < 1) return;
+            const dot = (ddx * dx + ddy * dy) / dist;
+            // dot=1 perfect alignment, dot=-1 opposite direction
+            // Strong preference for direction, but allow all nodes as fallback
+            const dirPenalty = dot > 0 ? (1 - dot) * 200 : 500 + (1 - dot) * 200;
+            const score = dist + dirPenalty;
             if (score < bestScore) { bestScore = score; best = n; }
           });
           if (best) { setSelectedId(best.id); setMultiSelect(new Set()); centerOnNode(best); }
