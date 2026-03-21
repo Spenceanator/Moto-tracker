@@ -154,10 +154,30 @@ var ECAT=["Parts","Tools","Transport","Registration/Insurance","Storage","Listin
 var TRIP_PURPOSE=["Pickup","Delivery","Parts Run","Test Ride","Inspection","Meetup/Showing","Other"];
 var JOB_STATUS=["intake","in-progress","waiting","done","delivered"];
 var DEF_LEAD_PROMPT='Analyze this motorcycle/vehicle listing screenshot. Extract all visible information and research the vehicle specs. Return ONLY a JSON object with these fields (use empty string if not found):\n{"year":"","make":"","model":"","askingPrice":"","mileage":"","titleStatus":"clean or salvage if stated","listingSource":"FB Marketplace, KSL, Craigslist, etc if visible","listingUrl":"","sellerName":"","sellerContact":"","estSellPrice":"your estimate of realistic sell price after fixing","flipDifficulty":"easy, moderate, or hard","partsAvailability":"excellent, good, fair, or poor","demandLevel":"high, medium, or low","estDaysToSell":"number estimate","notes":"any red flags, observations, or key details from the listing","status":"watching","knownIssues":[{"name":"issue description","severity":"low/med/high","difficulty":"easy/mod/hard","cost":"estimated dollar amount"}],"hiddenIssues":[{"name":"likely hidden issue based on age/type/symptoms","severity":"low/med/high","difficulty":"easy/mod/hard","cost":"estimated dollar amount"}],"specs":{"tirePsiFront":"psi spec","tirePsiRear":"psi spec","tireSizeFront":"size","tireSizeRear":"size","oilType":"weight and type","oilCapacity":"quarts or liters","fuelType":"octane requirement","sparkPlug":"part number","chainSize":"size and link count","coolantType":"type if liquid cooled","brakeFluid":"DOT type","bulbHeadlight":"bulb number","bulbTurnSignal":"bulb number","bulbTail":"bulb number","valveClearance":"intake/exhaust spec","torqueAxleFront":"ft-lbs","torqueAxleRear":"ft-lbs","torqueDrain":"ft-lbs","notes":"any other notable specs"}}\nLook up factory specs for this exact year/make/model. Be realistic about pricing and issues. Flag red flags. Return only the JSON, no other text.';
-function fresh(){return{version:DV,bikes:[],leads:[],sold:[],expenses:[],trips:[],jobs:[],apiKey:"",vehicles:[],leadPrompt:"",checklistTemplates:JSON.parse(JSON.stringify(DT))}}
+function fresh(){return{version:DV,bikes:[],leads:[],sold:[],expenses:[],trips:[],jobs:[],customers:[],apiKey:"",vehicles:[],leadPrompt:"",checklistTemplates:JSON.parse(JSON.stringify(DT))}}
 function migrate(d){
   if(!d.version)d.version=DV;if(!d.checklistTemplates)d.checklistTemplates=JSON.parse(JSON.stringify(DT));
   if(!d.leads)d.leads=[];if(!d.sold)d.sold=[];if(!d.expenses)d.expenses=[];if(!d.trips)d.trips=[];if(!d.jobs)d.jobs=[];d.jobs.forEach(function(j){if(j.laborHours&&!j.laborSeconds){j.laborSeconds=Math.round((parseFloat(j.laborHours)||0)*3600);delete j.laborHours}if(j.laborSeconds==null)j.laborSeconds=0;if(j.timerStart===undefined)j.timerStart=null;if(j.tasks)j.tasks.forEach(function(t){if(t.verified===undefined)t.verified=1})});if(!d.apiKey)d.apiKey="";if(!d.vehicles){d.vehicles=[];if(d.vehicle){d.vehicles.push(d.vehicle);delete d.vehicle}}if(d.leadPrompt==null)d.leadPrompt="";
+  // Migrate customers from existing jobs
+  if(!d.customers)d.customers=[];
+  if(d.customers.length===0&&d.jobs.length>0){
+    var seen={};d.jobs.forEach(function(j){
+      if(!j.customer)return;var key=j.customer.toLowerCase().trim();
+      if(!key||seen[key])return;
+      var cust={id:mid(),name:j.customer.trim(),contact:j.customerContact||"",vehicles:[]};
+      var veh=[j.vehicleYear,j.vehicleMake,j.vehicleModel].filter(Boolean);
+      if(veh.length>0)cust.vehicles.push({year:j.vehicleYear||"",make:j.vehicleMake||"",model:j.vehicleModel||""});
+      d.customers.push(cust);seen[key]=cust.id;j.customerId=cust.id;
+    });
+    // Second pass: link remaining jobs and merge vehicles
+    d.jobs.forEach(function(j){
+      if(j.customerId||!j.customer)return;var key=j.customer.toLowerCase().trim();
+      if(seen[key]){j.customerId=seen[key];
+        var c=d.customers.find(function(x){return x.id===seen[key]});
+        if(c&&j.vehicleMake){var exists=c.vehicles.some(function(v){return v.year===j.vehicleYear&&v.make===j.vehicleMake&&v.model===j.vehicleModel});
+          if(!exists)c.vehicles.push({year:j.vehicleYear||"",make:j.vehicleMake||"",model:j.vehicleModel||""})}}
+    });
+  }
   d.leads.forEach(function(l){if(!l.knownIssues)l.knownIssues=[];if(!l.hiddenIssues)l.hiddenIssues=[];
     ["year","make","model","askingPrice","estSellPrice","mileage","titleStatus","listingSource","flipDifficulty","partsAvailability","demandLevel","estDaysToSell","notes","listingUrl","sellerName","sellerContact"].forEach(function(k){if(l[k]!=null&&typeof l[k]!=="string")l[k]=String(l[k]);if(l[k]===undefined)l[k]=""});
     if(l.status&&!{"watching":1,"pursue":1,"pass":1}[l.status])l.status="watching";if(!l.specs)l.specs={};
@@ -233,9 +253,20 @@ function fetchIntake(cb,force){
   }).catch(function(){if(cb)cb()})
 }
 function acceptIntake(item){
-  data.jobs.push({id:mid(),customer:item.customer_name||"",customerContact:item.customer_contact||"",vehicleYear:item.vehicle_year||"",vehicleMake:item.vehicle_make||"",vehicleModel:item.vehicle_model||"",status:"intake",problem:item.problem||"",quoted:"",scheduledDate:item.preferred_date||"",laborSeconds:0,laborRate:"50",timerStart:null,tasks:[],notes:"Submitted via intake form",photo:null,createdAt:Date.now(),completedAt:null,deliveredAt:null});
+  var cn=(item.customer_name||"").trim(),cc=(item.customer_contact||"").trim();
+  var custId="";
+  if(cn){
+    var existing=data.customers.find(function(c){return c.name.toLowerCase()===cn.toLowerCase()});
+    if(existing){custId=existing.id;if(cc&&!existing.contact)existing.contact=cc}
+    else{custId=mid();data.customers.push({id:custId,name:cn,contact:cc,vehicles:[]})}
+  }
+  var vy=item.vehicle_year||"",vm=item.vehicle_make||"",vmo=item.vehicle_model||"";
+  if(custId&&vm){
+    var cust=data.customers.find(function(c){return c.id===custId});
+    if(cust){var dup=cust.vehicles.some(function(v){return v.year===vy&&v.make===vm&&v.model===vmo});if(!dup)cust.vehicles.push({year:vy,make:vm,model:vmo})}
+  }
+  data.jobs.push({id:mid(),customerId:custId,customer:cn,customerContact:cc,vehicleYear:vy,vehicleMake:vm,vehicleModel:vmo,status:"intake",problem:item.problem||"",quoted:"",scheduledDate:item.preferred_date||"",laborSeconds:0,laborRate:"50",timerStart:null,tasks:[],notes:"Submitted via intake form",photo:null,createdAt:Date.now(),completedAt:null,deliveredAt:null});
   save();
-  // Update intake row status
   fetch(SB_URL+"/rest/v1/intake?id=eq."+item.id,{method:"PATCH",headers:sbHeaders(),body:JSON.stringify({status:"accepted"})}).catch(function(){});
   _intakeItems=_intakeItems.filter(function(i){return i.id!==item.id});
   R();flash("Job created from request");
@@ -913,7 +944,14 @@ function rJobView(){
   var vTitle=[job.vehicleYear,job.vehicleMake,job.vehicleModel].filter(Boolean).join(" ")||"Service Job";
   var nr=h("div",{class:"f ac g8"});nr.append(h("h2",{style:{color:"#f5f5f5",fontSize:"20px",margin:0}},vTitle));
   var eb=h("button",{class:"ib",onClick:function(){ui.jEdit=!ui.jEdit;R()}});eb.innerHTML=I.edit;nr.append(eb);info.append(nr);
-  if(job.customer)info.append(h("span",{style:{color:"#22d3ee",fontSize:"12px"}},job.customer+(job.customerContact?" \u00b7 "+job.customerContact:"")));
+  if(job.customer){
+    var custInfo=h("div",{class:"f ac g6",style:{marginTop:"2px"}});
+    var linkedCust=job.customerId?data.customers.find(function(c){return c.id===job.customerId}):null;
+    var jobCount=linkedCust?data.jobs.filter(function(j){return j.customerId===linkedCust.id}).length:0;
+    custInfo.append(h("span",{style:{color:"#22d3ee",fontSize:"12px"}},job.customer+(job.customerContact?" \u00b7 "+job.customerContact:"")));
+    if(jobCount>1)custInfo.append(h("span",{style:{color:"#22d3ee50",fontSize:"10px"}},jobCount+" jobs"));
+    info.append(custInfo);
+  }
   if(job.scheduledDate){var sd=job.scheduledDate;var isToday=sd===today();var isPast=sd<today();info.append(h("span",{style:{color:isPast?"#ef4444":isToday?"#22c55e":"#888",fontSize:"11px",fontWeight:isToday||isPast?700:400}},"\u{1F4C5} "+(isToday?"Today":isPast?"Overdue — "+sd:sd)))}
   if(job.problem&&!ui.jEdit)info.append(h("p",{style:{marginTop:"4px",color:"#888",fontSize:"13px",lineHeight:1.4}},job.problem));
   hdr.append(info);hdr.append(badge(job.status));root.append(hdr);
@@ -1001,6 +1039,19 @@ function rJobView(){
     p.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.jEdit=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:function(){
       ["vehicleYear","vehicleMake","vehicleModel","customer","customerContact","problem","quoted","laborRate"].forEach(function(k){if(inps[k]!==undefined)job[k]=(inps[k]||"").trim()});
       job.scheduledDate=sdI.value||"";
+      // Sync customer record
+      if(job.customerId){
+        var cust=data.customers.find(function(c){return c.id===job.customerId});
+        if(cust){
+          if(job.customer)cust.name=job.customer;
+          if(job.customerContact)cust.contact=job.customerContact;
+          // Update vehicle in customer's list
+          var veh=cust.vehicles.find(function(v){return v.year===(inps.vehicleYear||"").trim()&&v.make===(inps.vehicleMake||"").trim()&&v.model===(inps.vehicleModel||"").trim()});
+          if(!veh&&(inps.vehicleMake||"").trim()){
+            cust.vehicles.push({year:(inps.vehicleYear||"").trim(),make:(inps.vehicleMake||"").trim(),model:(inps.vehicleModel||"").trim()});
+          }
+        }
+      }
       ui.jEdit=0;save();R();flash()
     }},"Save")));root.append(p)}
 
@@ -1289,7 +1340,7 @@ function rHome(){
     else if(ui.jobFilter==="delivered")filteredJobs=data.jobs.filter(function(j){return j.status==="delivered"});
     // Group by customer
     var groups={};var order=[];
-    filteredJobs.forEach(function(job){var key=job.customer?job.customer.trim().toLowerCase():"_none";if(!groups[key]){groups[key]={name:job.customer||"",contact:job.customerContact||"",jobs:[]};order.push(key)}groups[key].jobs.push(job);if(job.customerContact&&!groups[key].contact)groups[key].contact=job.customerContact});
+    filteredJobs.forEach(function(job){var key=job.customerId||( job.customer?job.customer.trim().toLowerCase():"_none");if(!groups[key]){var cust=job.customerId?data.customers.find(function(c){return c.id===job.customerId}):null;groups[key]={name:cust?cust.name:(job.customer||""),contact:cust?cust.contact:(job.customerContact||""),custId:job.customerId||"",jobs:[]};order.push(key)}groups[key].jobs.push(job);if(job.customerContact&&!groups[key].contact)groups[key].contact=job.customerContact});
     // Sort: groups with active jobs first
     order.sort(function(a,b){var aAct=groups[a].jobs.some(function(j){return j.status!=="delivered"});var bAct=groups[b].jobs.some(function(j){return j.status!=="delivered"});if(aAct&&!bAct)return-1;if(!aAct&&bAct)return 1;return 0});
     order.forEach(function(key){
@@ -1330,19 +1381,84 @@ function rHome(){
     if(filteredJobs.length===0)jList.append(h("p",{style:{color:"#555",fontSize:"13px",textAlign:"center",padding:"20px"}},data.jobs.length===0?"No service jobs yet.":"No "+ui.jobFilter+" jobs"));
     if(ui.addJob){
       var p3=h("div",{class:"ep fc g12"});p3.append(h("span",{class:"lbl",style:{color:"#22d3ee"}},"New Service Job"));
-      var cName=h("input",{type:"text",placeholder:"Customer name"});setTimeout(function(){cName.focus()},50);
+      var selCustId="",selVehIdx=-1;
+      // Customer selector
+      var custWrap=h("div",{class:"fc g6"});
+      var custLabel=h("span",{style:{color:"#888",fontSize:"11px"}},"Customer");custWrap.append(custLabel);
+      var custRow=h("div",{class:"f g4 fw"});
+      var custFields=h("div",{class:"fc g8",style:{display:"none"}});
+      var cName=h("input",{type:"text",placeholder:"Customer name"});
       var cContact=h("input",{type:"text",placeholder:"Phone / contact"});
+      custFields.append(cName,cContact);
+      // Vehicle fields (shown after customer selected or new)
+      var vehWrap=h("div",{class:"fc g6",style:{display:"none"}});
+      var vehLabel=h("span",{style:{color:"#888",fontSize:"11px"}},"Vehicle");vehWrap.append(vehLabel);
+      var vehRow=h("div",{class:"f g4 fw"});
+      var vehFields=h("div",{class:"f g8 fw",style:{display:"none"}});
       var vyr=h("input",{type:"text",placeholder:"Year",style:{width:"70px",flex:"none"}});
       var vmk=h("input",{type:"text",placeholder:"Make",style:{flex:1,minWidth:"80px"}});
       var vmd=h("input",{type:"text",placeholder:"Model",style:{flex:1,minWidth:"80px"}});
+      vehFields.append(vyr,vmk,vmd);
+      function showVehSelector(){
+        vehRow.innerHTML="";vehFields.style.display="none";vehWrap.style.display="flex";selVehIdx=-1;
+        if(selCustId){
+          var cust=data.customers.find(function(c){return c.id===selCustId});
+          if(cust&&cust.vehicles.length>0){
+            cust.vehicles.forEach(function(v,vi){
+              var vTitle=[v.year,v.make,v.model].filter(Boolean).join(" ");
+              var b=h("button",{class:"chip",style:{color:"#777",borderColor:"#333",fontSize:"11px"},onClick:function(e){
+                selVehIdx=vi;vyr.value=v.year;vmk.value=v.make;vmd.value=v.model;
+                vehRow.querySelectorAll("button").forEach(function(x){x.style.color="#777";x.style.borderColor="#333"});
+                e.currentTarget.style.color="#22d3ee";e.currentTarget.style.borderColor="#22d3ee";
+                vehFields.style.display="none";
+              }},vTitle);vehRow.append(b)});
+          }
+        }
+        var nb=h("button",{class:"chip",style:{color:"#555",borderColor:"#333",fontSize:"11px",fontStyle:"italic"},onClick:function(e){
+          selVehIdx=-2;vyr.value="";vmk.value="";vmd.value="";vehFields.style.display="flex";setTimeout(function(){vyr.focus()},50);
+          vehRow.querySelectorAll("button").forEach(function(x){x.style.color="#777";x.style.borderColor="#333"});
+          e.currentTarget.style.color="#22d3ee";e.currentTarget.style.borderColor="#22d3ee";
+        }},"+ new vehicle");vehRow.append(nb);
+      }
+      // Existing customers
+      data.customers.forEach(function(c){
+        var b=h("button",{class:"chip",style:{color:"#777",borderColor:"#333",fontSize:"11px"},onClick:function(e){
+          selCustId=c.id;cName.value=c.name;cContact.value=c.contact||"";custFields.style.display="none";
+          custRow.querySelectorAll("button").forEach(function(x){x.style.color="#777";x.style.borderColor="#333"});
+          e.currentTarget.style.color="#22d3ee";e.currentTarget.style.borderColor="#22d3ee";
+          showVehSelector();
+        }},c.name+(c.vehicles.length?" ("+c.vehicles.length+" vehicles)":""));custRow.append(b)});
+      var newCustBtn=h("button",{class:"chip",style:{color:"#555",borderColor:"#333",fontSize:"11px",fontStyle:"italic"},onClick:function(e){
+        selCustId="";cName.value="";cContact.value="";custFields.style.display="flex";
+        custRow.querySelectorAll("button").forEach(function(x){x.style.color="#777";x.style.borderColor="#333"});
+        e.currentTarget.style.color="#22d3ee";e.currentTarget.style.borderColor="#22d3ee";
+        vehWrap.style.display="flex";vehRow.innerHTML="";vehFields.style.display="flex";selVehIdx=-2;
+        setTimeout(function(){cName.focus()},50);
+      }},"+ new customer");custRow.append(newCustBtn);
+      custWrap.append(custRow,custFields);
+      vehWrap.append(vehRow,vehFields);
       var prob=h("textarea",{rows:"3",placeholder:"What's wrong? What do they need?"});
       var qt=h("input",{type:"text",placeholder:"Quoted price (optional)"});
       var sdNew=h("input",{type:"date",style:{flex:1}});
       var sdRow2=h("div",{class:"f ac g8"});sdRow2.append(h("span",{style:{color:"#888",fontSize:"12px"}},"Scheduled:"),sdNew);
-      p3.append(cName,cContact,h("div",{class:"f g8 fw"},vyr,vmk,vmd),prob,h("div",{class:"f g8"},qt,sdRow2));
+      p3.append(custWrap,vehWrap,prob,h("div",{class:"f g8"},qt,sdRow2));
       p3.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.addJob=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:function(){
-        if(!cName.value.trim()&&!vmk.value.trim())return;
-        data.jobs.push({id:mid(),customer:cName.value.trim(),customerContact:cContact.value.trim(),vehicleYear:vyr.value.trim(),vehicleMake:vmk.value.trim(),vehicleModel:vmd.value.trim(),status:"intake",problem:prob.value.trim(),quoted:qt.value.trim(),scheduledDate:sdNew.value||"",laborSeconds:0,laborRate:"50",timerStart:null,tasks:[],notes:"",photo:null,createdAt:Date.now(),completedAt:null,deliveredAt:null});
+        var cn=cName.value.trim(),cc=cContact.value.trim();
+        if(!cn&&!vmk.value.trim())return;
+        var custId=selCustId;
+        // Create new customer if needed
+        if(!custId&&cn){
+          var existing=data.customers.find(function(c){return c.name.toLowerCase()===cn.toLowerCase()});
+          if(existing){custId=existing.id;if(cc&&!existing.contact)existing.contact=cc}
+          else{custId=mid();data.customers.push({id:custId,name:cn,contact:cc,vehicles:[]})}
+        }
+        // Add vehicle to customer if new
+        var vy=vyr.value.trim(),vm=vmk.value.trim(),vmo=vmd.value.trim();
+        if(custId&&vm&&selVehIdx===-2){
+          var cust=data.customers.find(function(c){return c.id===custId});
+          if(cust){var dup=cust.vehicles.some(function(v){return v.year===vy&&v.make===vm&&v.model===vmo});if(!dup)cust.vehicles.push({year:vy,make:vm,model:vmo})}
+        }
+        data.jobs.push({id:mid(),customerId:custId||"",customer:cn,customerContact:cc,vehicleYear:vy,vehicleMake:vm,vehicleModel:vmo,status:"intake",problem:prob.value.trim(),quoted:qt.value.trim(),scheduledDate:sdNew.value||"",laborSeconds:0,laborRate:"50",timerStart:null,tasks:[],notes:"",photo:null,createdAt:Date.now(),completedAt:null,deliveredAt:null});
         ui.addJob=0;save();R();flash("Job created")
       }},"Create Job")));jList.append(p3)}
     else{var ab4=h("button",{class:"bg",style:{borderColor:"rgba(34,211,238,0.3)"},onClick:function(){ui.addJob=1;R()}});ab4.innerHTML=I.plus+" New service job";jList.append(ab4)}
