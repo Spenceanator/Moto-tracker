@@ -543,12 +543,14 @@ function Workspace() {
               if (d < bestDist) { bestDist = d; bestCon = con; }
             });
             if (bestCon) {
+              let capturedLabel = "";
               setConnections((p) => {
+                const live = p.find((x) => x.from === bestCon.from && x.to === bestCon.to);
+                capturedLabel = live ? live.label || "" : bestCon.label || "";
                 const filtered = p.filter((x) => !(x.from === bestCon.from && x.to === bestCon.to));
-                return [...filtered, { from: bestCon.from, to: heldId, label: "" }, { from: heldId, to: bestCon.to, label: bestCon.label || "" }];
+                return [...filtered, { from: bestCon.from, to: heldId, label: "" }, { from: heldId, to: bestCon.to, label: capturedLabel }];
               });
-              // Store splice origin so resolving can restore it
-              updateNode(heldId, { splicedInto: { from: bestCon.from, to: bestCon.to, label: bestCon.label || "" } });
+              setTimeout(() => updateNode(heldId, { splicedInto: { from: bestCon.from, to: bestCon.to, label: capturedLabel } }), 0);
             }
           }
         }
