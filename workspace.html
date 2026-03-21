@@ -262,6 +262,7 @@ function Workspace() {
   const [removeLevelProx, setRemoveLevelProx] = useState(0);
   const [templatePicker, setTemplatePicker] = useState(false);
   const jiggleRef = useRef({ positions: [], jiggling: false, lastCheck: 0 });
+  const mousePos = useRef({ x: 0, y: 0 });
   const [focusNodeId, setFocusNodeId] = useState(null);
   const [focusStart, setFocusStart] = useState(null);
   const [focusMicroStep, setFocusMicroStep] = useState("");
@@ -645,11 +646,29 @@ function Workspace() {
           e.preventDefault();
           const vis = nodes.filter((n) => n.parentId === viewParentId);
           if (vis.length === 0) return;
-          if (!selectedId) { const sorted = [...vis].sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(sorted[0].id); centerOnNode(sorted[0]); return; }
+          const dirs = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+          if (!selectedId) {
+            const mp = mousePos.current;
+            const rect = canvasRef.current ? canvasRef.current.getBoundingClientRect() : { left: panelW, top: 80 };
+            const mx = mp.x - rect.left - offset.x, my = mp.y - rect.top - offset.y;
+            const [dx, dy] = dirs[e.key];
+            let best = null, bestScore = Infinity;
+            vis.forEach((n) => {
+              const nx = n.x + 90, ny = n.y + 40;
+              const ddx = nx - mx, ddy = ny - my;
+              const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+              if (dist < 1) return;
+              const dot = (ddx * dx + ddy * dy) / dist;
+              const dirPenalty = dot > 0 ? (1 - dot) * 200 : 500 + (1 - dot) * 200;
+              const score = dist + dirPenalty;
+              if (score < bestScore) { bestScore = score; best = n; }
+            });
+            if (best) { setSelectedId(best.id); centerOnNode(best); }
+            return;
+          }
           const cur = vis.find((n) => n.id === selectedId);
           if (!cur) { setSelectedId(vis[0].id); return; }
           const cx = cur.x + 90, cy = cur.y + 40;
-          const dirs = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
           const [dx, dy] = dirs[e.key];
           let best = null, bestScore = Infinity;
           vis.forEach((n) => {
@@ -792,7 +811,7 @@ function Workspace() {
       {visibleNodes.length === 0 && vpNode && <div style={{ position: "fixed", top: "50%", left: `calc(${panelW}px + 50%)`, transform: "translate(-50%,-50%)", color: vc.accent + "30", fontSize: 13, textAlign: "center", zIndex: 3, pointerEvents: "none" }}>empty — double-click to add inside {vpNode.title || "this node"}</div>}
 
       {/* Canvas */}
-      <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 80, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s", touchAction: "none" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown} onTouchStart={handleCanvasTouchStart}>
+      <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 80, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s", touchAction: "none" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown} onTouchStart={handleCanvasTouchStart} onMouseMove={(e) => { if (!dragState && !isPanning) mousePos.current = { x: e.clientX, y: e.clientY }; }}>
         <div className="ci" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `radial-gradient(circle, ${gridC} 1px, transparent 1px)`, backgroundSize: "40px 40px", backgroundPosition: `${offset.x % 40}px ${offset.y % 40}px`, pointerEvents: "none" }} />
         <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }}>
           {visCon.map((c, ci) => { const f = getCenter(c.from), t = getCenter(c.to); const lc = vc ? vc.accent + "90" : "#888"; const llc = vc ? vc.accent + "b0" : "#aaa";
