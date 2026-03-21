@@ -396,11 +396,12 @@ function Workspace() {
   const fmtTimer = (secs) => { const m = Math.floor(secs / 60); const s = secs % 60; return `${m}:${s < 10 ? "0" : ""}${s}`; };
 
   const handleCanvasDblClick = useCallback((e) => { if (e.target !== canvasRef.current && !e.target.classList.contains("ci")) return; const r = canvasRef.current.getBoundingClientRect(); const pn = viewParentId ? getNode(viewParentId) : null; addNode(viewParentId, e.clientX - r.left - offset.x, e.clientY - r.top - offset.y, pn?.colorIdx || 0); }, [offset, viewParentId, addNode, getNode]);
-  const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setColorPickerNodeId(null); setMultiSelect(new Set()); setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
+  const handleCanvasMouseDown = useCallback((e) => { if (e.target === canvasRef.current || e.target.classList.contains("ci")) { if (connectingFrom) { setConnectingFrom(null); return; } setSelectedId(null); setEditingId(null); setEditingField(null); stopAddTask(); setEditingTaskId(null); setEditingBlockReason(null); setColorPickerNodeId(null); setMultiSelect(new Set()); lerpTarget.current = null; setIsPanning(true); setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y }); } }, [offset, connectingFrom, stopAddTask]);
   const handleNodeMouseDown = useCallback((e, nid) => { if (e.button === 2) return; e.stopPropagation(); if (connectingFrom) { if (connectingFrom !== nid) { setConnections((p) => { const ex = p.some((c) => (c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom)); if (ex) return p.filter((c) => !((c.from === connectingFrom && c.to === nid) || (c.from === nid && c.to === connectingFrom))); return [...p, { from: connectingFrom, to: nid, label: "" }]; }); } setConnectingFrom(null); return; } setColorPickerNodeId(null);
     if (e.shiftKey) { setMultiSelect((p) => { const ns = new Set(p); if (ns.has(nid)) ns.delete(nid); else ns.add(nid); return ns; }); return; }
     if (!multiSelect.has(nid)) setMultiSelect(new Set());
     setSelectedId(nid); const nd = nodes.find((n) => n.id === nid); if (!nd) return;
+    lerpTarget.current = null;
     const dragIds = multiSelect.size > 1 && multiSelect.has(nid) ? [...multiSelect] : [nid];
     const origins = {}; dragIds.forEach((id) => { const n = nodes.find((x) => x.id === id); if (n) origins[id] = { x: n.x, y: n.y }; });
     setDragState({ id: nid, ids: dragIds, sx: e.clientX, sy: e.clientY, origins });
@@ -551,15 +552,34 @@ function Workspace() {
     return () => { window.removeEventListener("touchmove", mv); window.removeEventListener("touchend", up); window.removeEventListener("touchcancel", up); };
   }, []);
 
-  // Mobile detection
+  // Camera lerp
+  const lerpTarget = useRef(null);
+  const lerpTo = useCallback((tx, ty) => {
+    lerpTarget.current = { x: tx, y: ty };
+    const step = () => {
+      if (!lerpTarget.current) return;
+      setOffset((prev) => {
+        const dx = lerpTarget.current.x - prev.x, dy = lerpTarget.current.y - prev.y;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) { const final = { x: lerpTarget.current.x, y: lerpTarget.current.y }; lerpTarget.current = null; return final; }
+        return { x: prev.x + dx * 0.18, y: prev.y + dy * 0.18 };
+      });
+      if (lerpTarget.current) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }, []);
+  const centerOnNode = useCallback((n) => {
+    if (!canvasRef.current || !n) return;
+    const r = canvasRef.current.getBoundingClientRect();
+    lerpTo(r.width / 2 - n.x - 90, r.height / 2 - n.y - 40);
+  }, [lerpTo]);
   const isMobile = typeof window !== "undefined" && (("ontouchstart" in window) || window.innerWidth < 768);
 
   const fieldKey = useCallback((e, nid, field) => {
     const kids = childCount(nid);
-    if (matchBind(e, keyBindings.goUp)) { e.preventDefault(); setEditingId(null); setEditingField(null); if (viewParentId) { const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); } }
+    if (matchBind(e, keyBindings.goUp)) { e.preventDefault(); setEditingId(null); setEditingField(null); if (viewParentId) { const vp = viewParentId; const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(vp); } }
     if (matchBind(e, keyBindings.sibling)) { e.preventDefault(); setEditingId(null); setEditingField(null); quickSibling(nid); }
     if (matchBind(e, keyBindings.child)) { e.preventDefault(); setEditingId(null); setEditingField(null); quickChild(nid); }
-    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && field === "title") { e.preventDefault(); if (kids > 0) { setEditingId(null); setEditingField(null); setViewParentId(nid); setOffset({ x: 0, y: 0 }); setSelectedId(null); } else { setEditingField("notes"); setTimeout(() => notesRef.current?.focus(), 50); } }
+    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && field === "title") { e.preventDefault(); if (kids > 0) { setEditingId(null); setEditingField(null); setViewParentId(nid); setOffset({ x: 0, y: 0 }); const ch = nodes.filter((n) => n.parentId === nid).sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(ch.length > 0 ? ch[0].id : null); } else { setEditingField("notes"); setTimeout(() => notesRef.current?.focus(), 50); } }
     if (e.key === "Escape") { setEditingId(null); setEditingField(null); }
   }, [childCount, getNode, viewParentId, quickChild, quickSibling, keyBindings]);
 
@@ -588,12 +608,12 @@ function Workspace() {
         else if (editingId) { setEditingId(null); setEditingField(null); }
       }
       if (!busy) {
-        if (matchBind(e, keyBindings.goUp) && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
-        if (e.key === "Backspace" && viewParentId) { e.preventDefault(); const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }
+        if (matchBind(e, keyBindings.goUp) && viewParentId) { e.preventDefault(); const vp = viewParentId; const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(vp); }
+        if (e.key === "Backspace" && viewParentId) { e.preventDefault(); const vp = viewParentId; const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(vp); }
         if (selectedId) {
           if (matchBind(e, keyBindings.sibling)) { e.preventDefault(); quickSibling(selectedId); }
           else if (matchBind(e, keyBindings.child)) { e.preventDefault(); quickChild(selectedId); }
-          else if (matchBind(e, keyBindings.drillIn)) { const k = nodes.filter((n) => n.parentId === selectedId).length; if (k > 0) { e.preventDefault(); setViewParentId(selectedId); setOffset({ x: 0, y: 0 }); setSelectedId(null); } }
+          else if (matchBind(e, keyBindings.drillIn)) { const k = nodes.filter((n) => n.parentId === selectedId).length; if (k > 0) { e.preventDefault(); setViewParentId(selectedId); setOffset({ x: 0, y: 0 }); const ch = nodes.filter((n) => n.parentId === selectedId).sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(ch.length > 0 ? ch[0].id : null); } }
           if (matchBind(e, keyBindings.addTask)) { e.preventDefault(); startAddTask(selectedId); }
           if (matchBind(e, keyBindings.promote)) { e.preventDefault(); promoteNode(selectedId); }
           if (matchBind(e, keyBindings.demote)) { e.preventDefault(); demoteNode(selectedId); }
@@ -606,7 +626,7 @@ function Workspace() {
           e.preventDefault();
           const vis = nodes.filter((n) => n.parentId === viewParentId);
           if (vis.length === 0) return;
-          if (!selectedId) { const sorted = [...vis].sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(sorted[0].id); return; }
+          if (!selectedId) { const sorted = [...vis].sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(sorted[0].id); centerOnNode(sorted[0]); return; }
           const cur = vis.find((n) => n.id === selectedId);
           if (!cur) { setSelectedId(vis[0].id); return; }
           const cx = cur.x + 90, cy = cur.y + 40;
@@ -624,7 +644,7 @@ function Workspace() {
             const score = dist + cross * 2;
             if (score < bestScore) { bestScore = score; best = n; }
           });
-          if (best) { setSelectedId(best.id); setMultiSelect(new Set()); }
+          if (best) { setSelectedId(best.id); setMultiSelect(new Set()); centerOnNode(best); }
         }
       }
     };
@@ -724,7 +744,7 @@ function Workspace() {
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {connectingFrom && <span style={{ color: "#f59e0b", fontSize: 11, marginRight: 4 }}>click to connect</span>}
-          {viewParentId && <button onClick={() => { const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: "none", border: `1px solid ${vc ? vc.accent + "30" : "#1a1a1c"}`, color: vc?.text || "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>← back</button>}
+          {viewParentId && <button onClick={() => { const vp = viewParentId; const p = getNode(viewParentId); setViewParentId(p?.parentId || null); setOffset({ x: 0, y: 0 }); setSelectedId(vp); }} style={{ background: "none", border: `1px solid ${vc ? vc.accent + "30" : "#1a1a1c"}`, color: vc?.text || "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>← back</button>}
           <button onClick={() => { setDecomposeOpen(true); setDecomposeMode("manual"); setDecomposeText(""); setDecomposeContext(""); setDecomposeChat([]); setDecomposeNodes([]); setTimeout(() => decomposeRef.current?.focus(), 100); }} style={{ background: "none", border: `1px solid ${decomposeOpen ? "#f59e0b40" : "#1a1a1c"}`, color: decomposeOpen ? "#f59e0b" : "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>decompose</button>
           <button onClick={() => { setSearchOpen(!searchOpen); if (!searchOpen) setTimeout(() => searchRef.current?.focus(), 50); else setSearchQuery(""); }} style={{ background: "none", border: `1px solid ${searchOpen ? "#525252" : "#1a1a1c"}`, color: searchOpen ? "#e2e8f0" : "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>find</button>
           <button onClick={() => setOffset({ x: 0, y: 0 })} style={{ background: "none", border: "1px solid #1a1a1c", color: "#525252", fontSize: 11, padding: "4px 10px", cursor: "pointer", borderRadius: 3, fontFamily: F }}>center</button>
@@ -804,7 +824,7 @@ function Workspace() {
             <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onTouchStart={(e) => handleNodeTouchStart(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
               style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isMultiDrag ? co.accent + "60" : isSel ? co.text + "40" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : isMultiDrag ? 40 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isMultiDrag ? `0 0 8px ${co.accent}20` : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : 1, transition: (dragState && dragState.origins && dragState.origins[node.id]) ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : (dragState && dragState.origins && dragState.origins[node.id]) ? "grabbing" : "grab" }}>
               <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: node.collapsed ? "none" : `1px solid ${co.border}30`, minHeight: 34 }}>
-                {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
+                {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); const ch = nodes.filter((n) => n.parentId === node.id).sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(ch.length > 0 ? ch[0].id : null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
                 {rc > 0 && <span style={{ background: SM.ready.color + "20", border: `1px solid ${SM.ready.color}40`, color: SM.ready.color, fontSize: 10, borderRadius: 3, padding: "1px 5px", fontFamily: F, flexShrink: 0 }}>{rc}</span>}
                 {isEd && editingField === "title" ? <input ref={titleRef} value={node.title} onChange={(e) => updateNode(node.id, { title: e.target.value })} onKeyDown={(e) => fieldKey(e, node.id, "title")} onBlur={() => { setEditingId(null); setEditingField(null); }} placeholder="name..." style={{ background: "none", border: "none", outline: "none", color: co.text, fontSize: 13, fontFamily: F, fontWeight: 600, width: "100%", padding: 0 }} />
                 : <span style={{ color: node.title ? co.text : co.text + "30", fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.title || "untitled"}</span>}
@@ -1122,7 +1142,7 @@ First task on the first component should be the smallest possible physical actio
         <div style={{ position: "fixed", bottom: 20, right: 16, zIndex: 200, display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
           {selectedId && (
             <div style={{ display: "flex", gap: 8 }}>
-              {nodes.filter((n) => n.parentId === selectedId).length > 0 && <button onClick={() => { setViewParentId(selectedId); setOffset({ x: 0, y: 0 }); setSelectedId(null); }} style={{ width: 44, height: 44, borderRadius: 22, background: "#1e40af50", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 14, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>↓</button>}
+              {nodes.filter((n) => n.parentId === selectedId).length > 0 && <button onClick={() => { setViewParentId(selectedId); setOffset({ x: 0, y: 0 }); const ch = nodes.filter((n) => n.parentId === selectedId).sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(ch.length > 0 ? ch[0].id : null); }} style={{ width: 44, height: 44, borderRadius: 22, background: "#1e40af50", border: "1px solid #3b82f640", color: "#93c5fd", fontSize: 14, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>↓</button>}
               <button onClick={() => enterFocus(selectedId)} style={{ width: 44, height: 44, borderRadius: 22, background: "#22c55e20", border: "1px solid #22c55e40", color: "#22c55e", fontSize: 18, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>◎</button>
               <button onClick={() => quickChild(selectedId)} style={{ width: 44, height: 44, borderRadius: 22, background: "#a855f720", border: "1px solid #a855f740", color: "#a855f7", fontSize: 18, cursor: "pointer", fontFamily: F, display: "flex", alignItems: "center", justifyContent: "center" }}>⤵</button>
             </div>
