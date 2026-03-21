@@ -762,6 +762,23 @@ function Workspace() {
   }, [nodes]);
   const visIds = new Set(visibleNodes.map((n) => n.id));
   const visCon = connections.filter((c) => visIds.has(c.from) && visIds.has(c.to));
+  // Cross-boundary connections: one end visible, one outside
+  const crossCon = useMemo(() => {
+    if (!viewParentId) return [];
+    return connections.filter((c) => (visIds.has(c.from) && !visIds.has(c.to)) || (!visIds.has(c.from) && visIds.has(c.to))).map((c) => {
+      const isOutgoing = visIds.has(c.from);
+      const insideId = isOutgoing ? c.from : c.to;
+      const outsideId = isOutgoing ? c.to : c.from;
+      const outsideNode = nodes.find((n) => n.id === outsideId);
+      const insideNode = nodes.find((n) => n.id === insideId);
+      if (!outsideNode || !insideNode) return null;
+      // Build path label
+      const pathParts = [];
+      let cur = outsideNode;
+      while (cur) { pathParts.unshift(cur.title || "untitled"); cur = nodes.find((n) => n.id === cur.parentId); if (pathParts.length > 3) break; }
+      return { ...c, isOutgoing, insideId, outsideId, outsideNode, insideNode, pathLabel: pathParts.join(" › ") };
+    }).filter(Boolean);
+  }, [connections, visibleNodes, viewParentId, nodes]);
   const searchIds = new Set(searchResults.map((n) => n.id));
   const bg = vc ? vc.tint : "#0a0a0b";
   const gridC = vc ? vc.accent + "18" : "#151517";
@@ -952,7 +969,53 @@ function Workspace() {
               <path d={pathD} stroke="transparent" strokeWidth="16" fill="none" style={{ pointerEvents: "stroke", cursor: "pointer" }}
                 onClick={(e) => { e.stopPropagation(); setConMenuIdx(ci); setConMenuPos({ x: e.clientX, y: e.clientY }); }} />
             </g>); })}
+          {/* Cross-boundary connections to external nodes */}
+          {crossCon.map((cc, xi) => {
+            const inside = cc.insideNode;
+            const ix = inside.x + 90 + offset.x, iy = inside.y + 30 + offset.y;
+            // Position ghost at edge: outgoing = right, incoming = left
+            const canvasEl = canvasRef.current;
+            const cw = canvasEl ? canvasEl.clientWidth : 800, ch = canvasEl ? canvasEl.clientHeight : 600;
+            const gx = cc.isOutgoing ? cw - 60 : 60;
+            const gy = Math.max(40, Math.min(ch - 40, iy));
+            const ext = Math.min(Math.abs(gx - ix) * 0.4, 80);
+            const fx = cc.isOutgoing ? ix : gx, fy = cc.isOutgoing ? iy : gy;
+            const tx = cc.isOutgoing ? gx : ix, ty = cc.isOutgoing ? gy : iy;
+            const c1x = fx + (cc.isOutgoing ? ext : -ext), c1y = fy;
+            const c2x = tx + (cc.isOutgoing ? -ext : ext), c2y = ty;
+            const pathD = `M${fx},${fy} C${c1x},${c1y} ${c2x},${c2y} ${tx},${ty}`;
+            const ghostColor = cc.outsideNode.resolved ? "#22c55e40" : vc ? vc.accent + "40" : "#44444480";
+            return (<g key={"x-" + xi} opacity="0.6">
+              <path d={pathD} stroke={ghostColor} strokeWidth="1.5" fill="none" strokeDasharray="4,4" />
+              <circle cx={fx} cy={fy} r="3" fill={ghostColor} />
+              <polygon points="-3,-2 3,0 -3,2" fill={ghostColor} opacity="0.7">
+                <animateMotion dur="3s" rotate="auto" repeatCount="indefinite"><mpath xlinkHref={"#xp-" + xi} /></animateMotion>
+              </polygon>
+              <path id={"xp-" + xi} d={pathD} fill="none" stroke="none" />
+            </g>);
+          })}
         </svg>
+
+        {/* Ghost node stubs for cross-boundary connections */}
+        {crossCon.map((cc, xi) => {
+          const canvasEl = canvasRef.current;
+          const cw = canvasEl ? canvasEl.clientWidth : 800, ch = canvasEl ? canvasEl.clientHeight : 600;
+          const inside = cc.insideNode;
+          const iy = inside.y + 30 + offset.y;
+          const gx = cc.isOutgoing ? cw - 8 : 8;
+          const gy = Math.max(40, Math.min(ch - 40, iy));
+          const oc = cc.outsideNode.colorIdx !== undefined ? COLORS[cc.outsideNode.colorIdx] : COLORS[0];
+          return (
+            <div key={"gs-" + xi} style={{ position: "absolute", left: cc.isOutgoing ? gx - 130 : gx, top: gy - 18, width: 130, height: 36, background: oc.bg + "c0", border: `1px dashed ${oc.accent}40`, borderRadius: cc.isOutgoing ? "6px 0 0 6px" : "0 6px 6px 0", display: "flex", alignItems: "center", gap: 6, padding: "0 10px", zIndex: 5, cursor: "pointer", overflow: "hidden" }}
+              onClick={(e) => { e.stopPropagation(); const p = nodes.find((n) => n.id === cc.outsideNode.parentId); setViewParentId(p ? p.id : null); setOffset({ x: 0, y: 0 }); setSelectedId(cc.outsideId); }}>
+              <span style={{ color: oc.accent + "60", fontSize: 9, flexShrink: 0 }}>{cc.isOutgoing ? "→" : "←"}</span>
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ color: oc.text + "b0", fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cc.outsideNode.title || "untitled"}</div>
+                <div style={{ color: oc.text + "40", fontSize: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cc.pathLabel}</div>
+              </div>
+            </div>
+          );
+        })}
 
         {/* Connection label editor */}
         {editingConIdx !== null && visCon[editingConIdx] && (() => {
