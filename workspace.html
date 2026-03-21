@@ -261,7 +261,7 @@ function Workspace() {
   const [radialHover, setRadialHover] = useState(null);
   const [removeLevelProx, setRemoveLevelProx] = useState(0);
   const [templatePicker, setTemplatePicker] = useState(false);
-  const jiggleRef = useRef({ positions: [], jiggling: false, lastCheck: 0 });
+  const jiggleRef = useRef({ positions: [], jiggling: false, lastCheck: 0, hoverTarget: null, hoverStart: 0 });
   const mousePos = useRef({ x: 0, y: 0 });
   const [focusNodeId, setFocusNodeId] = useState(null);
   const [focusStart, setFocusStart] = useState(null);
@@ -431,38 +431,47 @@ function Workspace() {
         const ddx = e.clientX - dragState.sx, ddy = e.clientY - dragState.sy;
         setNodes((p) => p.map((n) => { if (dragState.origins && dragState.origins[n.id]) return { ...n, x: dragState.origins[n.id].x + ddx, y: dragState.origins[n.id].y + ddy }; return n; }));
 
-        // Jiggle detection
+        // Gesture detection: hover dwell + jiggle
         const now = Date.now();
         const jr = jiggleRef.current;
-        jr.positions.push({ x: e.clientX, y: e.clientY, t: now });
-        // Keep last 500ms
-        jr.positions = jr.positions.filter((p) => now - p.t < 500);
-        if (jr.positions.length >= 6 && now - jr.lastCheck > 100) {
-          jr.lastCheck = now;
-          let reversals = 0;
-          for (let i = 2; i < jr.positions.length; i++) {
-            const dx1 = jr.positions[i-1].x - jr.positions[i-2].x;
-            const dx2 = jr.positions[i].x - jr.positions[i-1].x;
-            const dy1 = jr.positions[i-1].y - jr.positions[i-2].y;
-            const dy2 = jr.positions[i].y - jr.positions[i-1].y;
-            if ((dx1 > 3 && dx2 < -3) || (dx1 < -3 && dx2 > 3) || (dy1 > 3 && dy2 < -3) || (dy1 < -3 && dy2 > 3)) reversals++;
-          }
-          jr.jiggling = reversals >= 3;
-        }
-
-        // Check overlap with other visible nodes
         const draggedNode = nodes.find((n) => n.id === dragState.id);
-        if (draggedNode && jr.jiggling) {
+        if (draggedNode) {
           const dragX = draggedNode.x + 90, dragY = draggedNode.y + 40;
           const vis = nodes.filter((n) => n.parentId === viewParentId && n.id !== dragState.id);
           let closest = null, closestDist = Infinity;
           vis.forEach((n) => {
             const nx = n.x + 90, ny = n.y + 40;
             const d = Math.sqrt((dragX - nx) ** 2 + (dragY - ny) ** 2);
-            if (d < 120 && d < closestDist) { closestDist = d; closest = n; }
+            if (d < 140 && d < closestDist) { closestDist = d; closest = n; }
           });
-          if (closest) { setRadialTarget(closest.id); } else { setRadialTarget(null); }
-        } else if (!jr.jiggling) { setRadialTarget(null); }
+
+          // Track hover dwell on target
+          if (closest) {
+            if (jr.hoverTarget !== closest.id) { jr.hoverTarget = closest.id; jr.hoverStart = now; }
+            const dwellMs = now - jr.hoverStart;
+
+            // Jiggle detection (sensitive — 2 reversals, 2px threshold)
+            jr.positions.push({ x: e.clientX, y: e.clientY, t: now });
+            jr.positions = jr.positions.filter((p) => now - p.t < 400);
+            let reversals = 0;
+            for (let i = 2; i < jr.positions.length; i++) {
+              const dx1 = jr.positions[i-1].x - jr.positions[i-2].x;
+              const dx2 = jr.positions[i].x - jr.positions[i-1].x;
+              if ((dx1 > 2 && dx2 < -2) || (dx1 < -2 && dx2 > 2)) reversals++;
+              const dy1 = jr.positions[i-1].y - jr.positions[i-2].y;
+              const dy2 = jr.positions[i].y - jr.positions[i-1].y;
+              if ((dy1 > 2 && dy2 < -2) || (dy1 < -2 && dy2 > 2)) reversals++;
+            }
+            jr.jiggling = reversals >= 2;
+
+            // Show radial: either dwell > 400ms or jiggle
+            if (dwellMs > 400 || jr.jiggling) { setRadialTarget(closest.id); }
+          } else {
+            jr.hoverTarget = null; jr.hoverStart = 0; jr.jiggling = false;
+            jr.positions = [];
+            setRadialTarget(null);
+          }
+        }
 
         // Remove-level proximity (lower quarter center)
         if (viewParentId && canvasRef.current) {
@@ -516,7 +525,7 @@ function Workspace() {
           setNodes((p) => p.map((n) => n.id === heldId ? { ...n, parentId: grandParent, x: parent ? parent.x + 220 : 60, y: parent ? parent.y : 60 } : n));
           setViewParentId(grandParent); setOffset({ x: 0, y: 0 }); setSelectedId(heldId);
         }
-        jiggleRef.current = { positions: [], jiggling: false, lastCheck: 0 };
+        jiggleRef.current = { positions: [], jiggling: false, lastCheck: 0, hoverTarget: null, hoverStart: 0 };
         setRadialTarget(null); setRadialHover(null); setRemoveLevelProx(0);
       }
       setDragState(null); setIsPanning(false); setPanStart(null);
