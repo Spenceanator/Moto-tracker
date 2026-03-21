@@ -559,7 +559,7 @@ function Workspace() {
     };
     window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
-  }, [dragState, isPanning, panStart, nodes, viewParentId, radialTarget, radialHover, removeLevelProx]);
+  }, [dragState, isPanning, panStart, nodes, connections, viewParentId, radialTarget, radialHover, removeLevelProx]);
 
   // Touch handlers
   const touchRef = useRef({ dragging: null, panning: false, startX: 0, startY: 0, lastTap: 0 });
@@ -1077,24 +1077,17 @@ function Workspace() {
                     if (!wasResolved && node.splicedInto) {
                       const s = node.splicedInto;
                       setConnections((p) => {
-                        const filtered = p.filter((x) => !((x.from === s.from && x.to === node.id) || (x.from === node.id && x.to === s.to)));
-                        const already = filtered.some((x) => x.from === s.from && x.to === s.to);
-                        if (already) return filtered;
-                        return [...filtered, { from: s.from, to: s.to, label: s.label || "" }];
+                        const conB = p.find((x) => x.from === node.id && x.to === s.to);
+                        const liveLabel = (conB && conB.label) || s.label || "";
+                        const already = p.some((x) => x.from === s.from && x.to === s.to);
+                        if (already) return p;
+                        return [...p, { from: s.from, to: s.to, label: liveLabel }];
                       });
                     }
-                    // If unresolving a spliced node, re-splice
+                    // If unresolving a spliced node, remove restored direct connection
                     if (wasResolved && node.splicedInto) {
                       const s = node.splicedInto;
-                      setConnections((p) => {
-                        const filtered = p.filter((x) => !(x.from === s.from && x.to === s.to));
-                        const hasA = filtered.some((x) => x.from === s.from && x.to === node.id);
-                        const hasB = filtered.some((x) => x.from === node.id && x.to === s.to);
-                        const result = [...filtered];
-                        if (!hasA) result.push({ from: s.from, to: node.id, label: "" });
-                        if (!hasB) result.push({ from: node.id, to: s.to, label: s.label || "" });
-                        return result;
-                      });
+                      setConnections((p) => p.filter((x) => !(x.from === s.from && x.to === s.to)));
                     }
                   }} style={{ background: node.resolved ? "#22c55e20" : co.text + "08", border: "none", borderRadius: 4, color: node.resolved ? "#22c55e" : co.text + "60", cursor: "pointer", fontSize: 11, padding: "4px 6px", lineHeight: 1, fontFamily: F }}>{node.resolved ? "✓" : "✓"}</button>
                   <button onClick={(e) => { e.stopPropagation(); deleteNode(node.id); }} style={{ background: "#ef444410", border: "none", borderRadius: 4, color: "#ef444460", cursor: "pointer", fontSize: 12, padding: "4px 6px", lineHeight: 1 }}>×</button>
