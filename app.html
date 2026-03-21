@@ -395,11 +395,11 @@ timer:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="curre
 };
 function chev(o){return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate('+(o?90:0)+'deg);transition:transform .15s"><path d="M5 3l4 4-4 4"/></svg>'}
 
-var data=load(),cv="home",selBike=null,selLead=null,selJob=null,hTab="today";
+var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";
 var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]};
 var st=null;
 function ss(){if(st)clearTimeout(st);st=setTimeout(save,200)}
-function nav(v,id){cv=v;selBike=v==="bike"?id:null;selLead=v==="lead"?id:null;selJob=v==="job"?id:null;ui=Object.assign({},ui,{addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,tExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,sellFlow:0,sellPrice:"",sellDate:"",scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]});R()}
+function nav(v,id){cv=v;selBike=v==="bike"?id:null;selLead=v==="lead"?id:null;selJob=v==="job"?id:null;selClient=v==="client"?id:null;ui=Object.assign({},ui,{addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,tExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,sellFlow:0,sellPrice:"",sellDate:"",scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]});R()}
 
 function h(t,a){var c=Array.prototype.slice.call(arguments,2);var e=document.createElement(t);if(a)Object.entries(a).forEach(function(p){var k=p[0],v=p[1];if(k==="class")e.className=v;else if(k==="style"&&typeof v==="object")Object.assign(e.style,v);else if(k.startsWith("on"))e.addEventListener(k.slice(2).toLowerCase(),v);else if(k==="href"){e.setAttribute(k,v);e.setAttribute("target","_blank");e.setAttribute("rel","noopener")}else e.setAttribute(k,v)});c.flat(Infinity).forEach(function(x){if(x==null||x===false)return;e.appendChild(typeof x==="string"||typeof x==="number"?document.createTextNode(String(x)):x)});return e}
 function ic(n,s){var sp=document.createElement("span");sp.innerHTML=I[n]||"";sp.style.display="flex";sp.style.alignItems="center";if(s)Object.assign(sp.style,s);return sp}
@@ -1107,6 +1107,115 @@ function rJobView(){
   return root;
 }
 
+// ============ CLIENT PROFILE ============
+function rClientView(){
+  var cust=data.customers.find(function(c){return c.id===selClient});
+  if(!cust){nav("home");return h("div")}
+  var root=h("div",{class:"fc g16"});
+  var custJobs=data.jobs.filter(function(j){return j.customerId===cust.id});
+  var activeJobs=custJobs.filter(function(j){return j.status!=="delivered"});
+  var deliveredJobs=custJobs.filter(function(j){return j.status==="delivered"});
+
+  // Header
+  var hdr=h("div",{class:"f as g12"});
+  var bb=h("button",{class:"ib",style:{marginTop:"2px"},onClick:function(){nav("home");hTab="clients"}});bb.innerHTML=I.back;hdr.append(bb);
+  var info=h("div",{style:{flex:1}});
+  var nr=h("div",{class:"f ac g8"});
+  if(ui.edit){
+    var ni=h("input",{type:"text",value:cust.name,style:{fontSize:"18px",fontWeight:700,flex:1},onInput:function(e){cust.name=e.target.value}});
+    nr.append(ni);
+  }else{
+    nr.append(h("h2",{style:{color:"#f5f5f5",fontSize:"20px",margin:0}},cust.name||"Unnamed Client"));
+  }
+  var eb=h("button",{class:"ib",onClick:function(){ui.edit=!ui.edit;R()}});eb.innerHTML=I.edit;nr.append(eb);
+  info.append(nr);
+  // Contact
+  if(ui.edit){
+    var ci=h("input",{type:"text",value:cust.contact||"",placeholder:"Phone / email / contact",style:{marginTop:"6px",fontSize:"13px"},onInput:function(e){cust.contact=e.target.value}});
+    info.append(ci);
+  }else if(cust.contact){
+    info.append(h("span",{style:{color:"#888",fontSize:"13px",marginTop:"4px"}},cust.contact));
+  }
+  var meta=h("div",{class:"f g12",style:{marginTop:"6px",fontSize:"12px"}});
+  if(activeJobs.length>0)meta.append(h("span",{style:{color:"#22d3ee"}},activeJobs.length+" active"));
+  if(deliveredJobs.length>0)meta.append(h("span",{style:{color:"#22c55e"}},deliveredJobs.length+" delivered"));
+  info.append(meta);hdr.append(info);root.append(hdr);
+
+  // Save bar when editing
+  if(ui.edit){
+    root.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.edit=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:function(){
+      // Sync name/contact to all linked jobs
+      custJobs.forEach(function(j){j.customer=cust.name;j.customerContact=cust.contact||""});
+      ui.edit=0;save();R();flash("Client updated")
+    }},"Save")));
+  }
+
+  // Vehicles
+  var vSec=h("div",{class:"fc g8"});
+  vSec.append(h("span",{class:"lbl",style:{color:"#60a5fa"}},"Vehicles ("+cust.vehicles.length+")"));
+  cust.vehicles.forEach(function(v,vi){
+    var vTitle=[v.year,v.make,v.model].filter(Boolean).join(" ")||"Unknown Vehicle";
+    var vJobs=custJobs.filter(function(j){return j.vehicleYear===v.year&&j.vehicleMake===v.make&&j.vehicleModel===v.model});
+    var vCard=h("div",{class:"f ac g10",style:{padding:"10px 12px",background:"rgba(96,165,250,0.06)",borderRadius:"8px",border:"1px solid rgba(96,165,250,0.12)"}});
+    var vInfo=h("div",{style:{flex:1}});
+    if(ui.edit){
+      var vRow=h("div",{class:"f g6 fw"});
+      var vy=h("input",{type:"text",value:v.year||"",placeholder:"Year",style:{width:"60px",flex:"none",fontSize:"12px",padding:"4px 6px"},onInput:function(e){v.year=e.target.value}});
+      var vm=h("input",{type:"text",value:v.make||"",placeholder:"Make",style:{flex:1,minWidth:"60px",fontSize:"12px",padding:"4px 6px"},onInput:function(e){v.make=e.target.value}});
+      var vmo=h("input",{type:"text",value:v.model||"",placeholder:"Model",style:{flex:1,minWidth:"60px",fontSize:"12px",padding:"4px 6px"},onInput:function(e){v.model=e.target.value}});
+      vRow.append(vy,vm,vmo);vInfo.append(vRow);
+    }else{
+      vInfo.append(h("span",{style:{color:"#e5e5e5",fontSize:"13px",fontWeight:600}},vTitle));
+    }
+    if(vJobs.length>0)vInfo.append(h("span",{style:{color:"#555",fontSize:"10px",marginTop:"2px"}},vJobs.length+" job"+(vJobs.length!==1?"s":"")));
+    vCard.append(vInfo);
+    if(ui.edit){var del=h("button",{class:"ib",style:{color:"#ef444460"},onClick:function(){cust.vehicles.splice(vi,1);R()}});del.innerHTML=I.trash;vCard.append(del)}
+    vSec.append(vCard)});
+  // Add vehicle
+  if(ui.edit){
+    var avBtn=h("button",{class:"bg",style:{borderColor:"rgba(96,165,250,0.3)",fontSize:"12px",padding:"8px"},onClick:function(){cust.vehicles.push({year:"",make:"",model:""});R()}});
+    avBtn.innerHTML=I.plus+" Add vehicle";vSec.append(avBtn);
+  }
+  root.append(vSec);
+
+  // Job history
+  var jSec=h("div",{class:"fc g8"});
+  jSec.append(h("span",{class:"lbl",style:{color:"#22d3ee"}},"Jobs ("+custJobs.length+")"));
+  custJobs.sort(function(a,b){return(b.createdAt||0)-(a.createdAt||0)});
+  custJobs.forEach(function(j){
+    var vt=[j.vehicleYear,j.vehicleMake,j.vehicleModel].filter(Boolean).join(" ")||"Service Job";
+    var card=h("button",{class:"card fc g4",onClick:function(){nav("job",j.id)}});
+    var top=h("div",{class:"f ac g10"});
+    top.append(h("span",{style:{color:"#f5f5f5",fontSize:"14px",fontWeight:600,flex:1}},vt));
+    top.append(badge(j.status));card.append(top);
+    if(j.problem)card.append(h("span",{style:{color:"#666",fontSize:"11px",lineHeight:1.3}},j.problem.slice(0,80)+(j.problem.length>80?"...":"")));
+    jSec.append(card)});
+  if(custJobs.length===0)jSec.append(h("p",{style:{color:"#555",fontSize:"12px"}},"No jobs yet"));
+  root.append(jSec);
+
+  // Quick add job for this client
+  root.append(h("button",{class:"bg",style:{borderColor:"rgba(34,211,238,0.3)"},onClick:function(){
+    nav("home");hTab="jobs";ui.addJob=1;
+    // Pre-select this customer in the form on next render
+    setTimeout(function(){
+      var chips=document.querySelectorAll(".chip");
+      chips.forEach(function(chip){if(chip.textContent.indexOf(cust.name)===0)chip.click()})
+    },100);
+  }},I.plus+" New job for "+cust.name));
+
+  // Delete
+  if(ui.cfDel===cust.id){
+    root.append(confirm_("Delete this client? Jobs will keep their data but lose the link.",function(){
+      data.jobs.forEach(function(j){if(j.customerId===cust.id)j.customerId=""});
+      data.customers=data.customers.filter(function(c){return c.id!==cust.id});
+      save();nav("home");hTab="clients"
+    },function(){ui.cfDel=null;R()}));
+  }else{
+    root.append(h("button",{class:"bd",style:{marginTop:"12px"},onClick:function(){ui.cfDel=cust.id;R()}},"Delete client"));
+  }
+  return root;
+}
+
 function rHome(){
   var root=h("div",{class:"fc g10"});var hdr=h("div",{class:"f ac jb",style:{marginBottom:"12px"}});
   var ajCount=data.jobs.filter(function(j){return j.status!=="delivered"}).length;
@@ -1116,7 +1225,7 @@ function rHome(){
   var nvb=h("div",{class:"nb"});
   var activeJobs=data.jobs.filter(function(j){return j.status!=="delivered"}).length;
   var readyCount=0;data.bikes.forEach(function(b){readyCount+=b.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}).length});data.jobs.forEach(function(j){if(j.status==="intake"||j.status==="in-progress")readyCount+=j.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}).length});
-  ["today","bikes","leads","jobs","sold","expenses"].forEach(function(t){var labels={today:"Today"+(readyCount?" ("+readyCount+")":""),bikes:"Bikes ("+data.bikes.length+")",leads:"Leads ("+data.leads.length+")",jobs:"Jobs"+(activeJobs?" ("+activeJobs+")":"")+(_intakeItems.length?" +"+_intakeItems.length:""),sold:"Sold ("+data.sold.length+")",expenses:"$"};
+  ["today","bikes","leads","jobs","clients","sold","expenses"].forEach(function(t){var labels={today:"Today"+(readyCount?" ("+readyCount+")":""),bikes:"Bikes ("+data.bikes.length+")",leads:"Leads ("+data.leads.length+")",jobs:"Jobs"+(activeJobs?" ("+activeJobs+")":"")+(_intakeItems.length?" +"+_intakeItems.length:""),clients:"Clients ("+data.customers.length+")",sold:"Sold ("+data.sold.length+")",expenses:"$"};
     nvb.append(h("button",{class:"nt"+(hTab===t?" a":""),onClick:function(){hTab=t;ui.addBike=0;ui.addLead=0;ui.addJob=0;ui.showPaste=0;ui.leadFilter=null;ui.jobFilter="active";ui.addExp=0;ui.addTrip=0;ui.scanLead=0;R()}},labels[t]))});root.append(nvb);
 
   if(hTab==="today"){
@@ -1463,13 +1572,34 @@ function rHome(){
       }},"Create Job")));jList.append(p3)}
     else{var ab4=h("button",{class:"bg",style:{borderColor:"rgba(34,211,238,0.3)"},onClick:function(){ui.addJob=1;R()}});ab4.innerHTML=I.plus+" New service job";jList.append(ab4)}
     root.append(jList);
+  }else if(hTab==="clients"){
+    var cList=h("div",{class:"fc g10"});
+    if(data.customers.length===0)cList.append(h("p",{style:{color:"#555",fontSize:"13px",textAlign:"center",padding:"20px"}},"No clients yet. They'll appear when you create jobs."));
+    data.customers.forEach(function(cust){
+      var custJobs=data.jobs.filter(function(j){return j.customerId===cust.id});
+      var activeCount=custJobs.filter(function(j){return j.status!=="delivered"}).length;
+      var card=h("button",{class:"card fc g6",onClick:function(){nav("client",cust.id)}});
+      var top=h("div",{class:"f ac g10"});
+      top.append(h("span",{style:{color:"#f5f5f5",fontSize:"16px",fontWeight:700,flex:1}},cust.name||"Unnamed"));
+      if(activeCount>0)top.append(h("span",{style:{background:"rgba(34,211,238,0.15)",color:"#22d3ee",padding:"2px 8px",borderRadius:"10px",fontSize:"10px",fontWeight:600}},activeCount+" active"));
+      card.append(top);
+      var meta=h("div",{class:"f g8 fw",style:{fontSize:"11px"}});
+      if(cust.contact)meta.append(h("span",{style:{color:"#888"}},cust.contact));
+      meta.append(h("span",{style:{color:"#555"}},cust.vehicles.length+" vehicle"+(cust.vehicles.length!==1?"s":"")));
+      meta.append(h("span",{style:{color:"#555"}},custJobs.length+" job"+(custJobs.length!==1?"s":"")));
+      card.append(meta);
+      if(cust.vehicles.length>0){var vRow=h("div",{class:"f g4 fw"});cust.vehicles.forEach(function(v){
+        vRow.append(h("span",{style:{color:"#60a5fa",fontSize:"10px",background:"rgba(96,165,250,0.08)",padding:"2px 6px",borderRadius:"4px"}},[v.year,v.make,v.model].filter(Boolean).join(" ")))});
+        card.append(vRow)}
+      cList.append(card)});
+    root.append(cList);
   }else if(hTab==="sold"){root.append(rAnalytics())
   }else if(hTab==="expenses"){root.append(rExpenses())}
   return root;
 }
 
 function R(){var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
-  if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());
+  if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());else if(cv==="client")wrap.append(rClientView());
   app.append(wrap)}
 R();renderNav();syncPull(function(){R();startPoll();fetchIntake(function(){R()})});
 document.addEventListener("visibilitychange",function(){if(!document.hidden){pollCheck();startPoll();fetchIntake(function(){R()})}});
