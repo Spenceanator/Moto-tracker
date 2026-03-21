@@ -843,7 +843,7 @@ function Workspace() {
           </div>
         </>}
       </div>
-      <button onClick={() => setPanelOpen(!panelOpen)} style={{ position: "fixed", top: 80, left: panelOpen ? 260 : 0, zIndex: 100, background: "#111113", border: "1px solid #1a1a1c", borderLeft: "none", borderTop: "none", color: "#525252", fontSize: 11, padding: "6px 5px", cursor: "pointer", borderRadius: "0 0 4px 0", fontFamily: F, transition: "left 0.2s" }}>{panelOpen ? "◂" : "▸"}</button>
+      <button onClick={() => setPanelOpen(!panelOpen)} style={{ position: "fixed", top: vpNode && parentContextOpen ? 120 : 80, left: panelOpen ? 260 : 0, zIndex: 100, background: "#111113", border: "1px solid #1a1a1c", borderLeft: "none", borderTop: "none", color: "#525252", fontSize: 11, padding: "6px 5px", cursor: "pointer", borderRadius: "0 0 4px 0", fontFamily: F, transition: "left 0.2s, top 0.2s" }}>{panelOpen ? "◂" : "▸"}</button>
 
       {/* Top bar */}
       <div style={{ position: "fixed", top: 40, left: 0, right: 0, height: 40, background: bg, borderBottom: `1px solid ${vc ? vc.accent + "20" : "#1a1a1c"}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", paddingLeft: panelW + 12, zIndex: 100, transition: "background 0.3s, padding-left 0.2s" }}>
