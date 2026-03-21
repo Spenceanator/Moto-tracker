@@ -22,6 +22,7 @@
   input::placeholder, textarea::placeholder { opacity: 0.5; }
   @keyframes flowDash { to { stroke-dashoffset: -24; } }
   @keyframes pulse { 0%,100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }
+  @keyframes pinPulse { 0%,100% { box-shadow: 0 0 8px rgba(245,158,11,0.15); } 50% { box-shadow: 0 0 20px rgba(245,158,11,0.3); } }
 </style>
 </head>
 <body>
@@ -331,6 +332,27 @@ function Workspace() {
   useEffect(() => { if (loaded) { const t = setTimeout(() => saveJSON(KEYS_STORE, keyBindings), 300); return () => clearTimeout(t); } }, [keyBindings, loaded]);
 
   const visibleNodes = nodes.filter((n) => n.parentId === viewParentId);
+
+  // Auto-navigate to first pinned node on load
+  const didAutoNav = useRef(false);
+  useEffect(() => {
+    if (!loaded || didAutoNav.current || nodes.length === 0) return;
+    const pinned = nodes.find((n) => n.pinToday);
+    if (pinned) {
+      didAutoNav.current = true;
+      // Navigate to the pinned node's parent level and select it
+      setViewParentId(pinned.parentId || null);
+      setSelectedId(pinned.id);
+      setOffset({ x: 0, y: 0 });
+      // Defer lerp so the view is set first
+      setTimeout(() => {
+        if (canvasRef.current) {
+          const r = canvasRef.current.getBoundingClientRect();
+          setOffset({ x: r.width / 2 - pinned.x - 90, y: r.height / 2 - pinned.y - 40 });
+        }
+      }, 100);
+    } else { didAutoNav.current = true; }
+  }, [loaded, nodes]);
   const childCount = useCallback((id) => nodes.filter((n) => n.parentId === id).length, [nodes]);
   const getNode = useCallback((id) => nodes.find((n) => n.id === id), [nodes]);
   const getChildren = useCallback((id) => nodes.filter((n) => n.parentId === id), [nodes]);
@@ -347,7 +369,7 @@ function Workspace() {
   const getBreadcrumbs = useCallback(() => { const r = []; let c = viewParentId; while (c) { const n = nodes.find((x) => x.id === c); if (!n) break; r.unshift(n); c = n.parentId; } r.unshift({ id: null, title: "root" }); return r; }, [viewParentId, nodes]);
   const getAncestors = useCallback((id) => { const a = []; let c = nodes.find((n) => n.id === id)?.parentId; while (c) { const n = nodes.find((x) => x.id === c); if (!n) break; a.unshift(n); c = n.parentId; } return a; }, [nodes]);
   const allDescIds = useCallback((id) => { const r = [], s = [id]; while (s.length) { const c = s.pop(); nodes.filter((n) => n.parentId === c).forEach((k) => { r.push(k.id); s.push(k.id); }); } return r; }, [nodes]);
-  const searchResults = useMemo(() => { if (!searchQuery.trim()) return []; const q = searchQuery.toLowerCase(); return nodes.filter((n) => n.title.toLowerCase().includes(q) || n.notes.toLowerCase().includes(q) || (n.tasks || []).some((t) => t.text.toLowerCase().includes(q))); }, [searchQuery, nodes]);
+  const searchResults = useMemo(() => { if (!searchQuery.trim()) return []; const q = searchQuery.toLowerCase(); const isPinSearch = q === "today" || q === "pinned" || q === "pin"; return nodes.filter((n) => (isPinSearch && n.pinToday) || n.title.toLowerCase().includes(q) || n.notes.toLowerCase().includes(q) || (n.tasks || []).some((t) => t.text.toLowerCase().includes(q))); }, [searchQuery, nodes]);
   const navigateToNode = useCallback((id) => { const n = nodes.find((x) => x.id === id); if (!n) return; setViewParentId(n.parentId); setSelectedId(n.id); if (canvasRef.current) { const r = canvasRef.current.getBoundingClientRect(); setOffset({ x: r.width / 2 - n.x - 100, y: r.height / 2 - n.y - 30 }); } }, [nodes]);
 
   const addNode = useCallback((pid, x, y, ci) => { const n = { id: uid(), parentId: pid, x, y, title: "", notes: "", colorIdx: ci, collapsed: false, tasks: [], created: Date.now() }; setNodes((p) => [...p, n]); setSelectedId(n.id); setEditingId(n.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); return n; }, []);
@@ -851,6 +873,7 @@ function Workspace() {
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
             {panelTab === "ready" && <>
+              {(() => { const pinned = nodes.filter((n) => n.pinToday); if (pinned.length === 0) return null; return <><div style={{ padding: "10px 12px 4px" }}><span style={{ color: "#f59e0b", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em" }}>◉ TODAY ({pinned.length})</span></div>{pinned.map((n) => <div key={n.id} onClick={() => { setViewParentId(n.parentId || null); setSelectedId(n.id); }} style={{ padding: "6px 12px", cursor: "pointer", borderBottom: "1px solid #0a0a0b" }} onMouseEnter={(e) => e.currentTarget.style.background = "#1a1a1c"} onMouseLeave={(e) => e.currentTarget.style.background = "none"}><div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 600 }}>{n.title || "untitled"}</div>{(n.tasks || []).filter((t) => t.status === "ready").length > 0 && <div style={{ color: "#525252", fontSize: 10, marginTop: 2 }}>{(n.tasks || []).filter((t) => t.status === "ready").length} ready tasks</div>}</div>)}<div style={{ borderBottom: "1px solid #1a1a1c", margin: "4px 0" }} /></>; })()}
               {allReadyTasks.length === 0 && <div style={{ color: "#333", fontSize: 11, padding: "12px" }}>no ready tasks</div>}
               {allReadyTasks.map(({ task, node, path }) => <PanelTaskItem key={task.id} task={task} node={node} path={path} />)}
               {allBlockedTasks.length > 0 && <><div style={{ padding: "10px 12px 4px", borderTop: "1px solid #1a1a1c", marginTop: 4 }}><span style={{ color: SM.blocked.color, fontSize: 11, fontWeight: 600, letterSpacing: "0.05em" }}>{SM.blocked.icon} BLOCKED ({allBlockedTasks.length})</span></div>{allBlockedTasks.map(({ task, node, path }) => <PanelTaskItem key={task.id} task={task} node={node} path={path} />)}</>}
@@ -1060,8 +1083,9 @@ function Workspace() {
           const sorted = [...tasks.filter((t) => t.status === "ready"), ...tasks.filter((t) => t.status === "blocked"), ...tasks.filter((t) => t.status === "done")];
           return (
             <div key={node.id} onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onTouchStart={(e) => handleNodeTouchStart(e, node.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(node.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); }}
-              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isMultiDrag ? co.accent + "60" : isSel ? co.text + "40" : node.resolved ? "#22c55e30" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : isMultiDrag ? 40 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isMultiDrag ? `0 0 8px ${co.accent}20` : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : node.resolved && !isSel ? 0.45 : 1, transition: (dragState && dragState.origins && dragState.origins[node.id]) ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : (dragState && dragState.origins && dragState.origins[node.id]) ? "grabbing" : "grab" }}>
+              style={{ position: "absolute", left: node.x + offset.x, top: node.y + offset.y, minWidth: 180, maxWidth: 340, background: co.bg, border: `${isMSel ? "2px" : "1px"} solid ${isMatch ? "#f59e0b" : isMSel ? "#f59e0b80" : isMultiDrag ? co.accent + "60" : isSel ? co.text + "40" : node.pinToday ? "#f59e0b50" : node.resolved ? "#22c55e30" : co.border + "60"}`, borderRadius: 6, zIndex: isSel ? 50 : isMSel ? 45 : isMultiDrag ? 40 : node.pinToday ? 35 : 10, boxShadow: isMatch ? "0 0 12px rgba(245,158,11,0.25)" : isMSel ? "0 0 0 1px #f59e0b30, 0 4px 16px rgba(0,0,0,0.4)" : isMultiDrag ? `0 0 8px ${co.accent}20` : isSel ? `0 0 0 1px ${co.text}15, 0 8px 32px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.3)", opacity: isDim ? 0.2 : node.resolved && !isSel ? 0.45 : 1, animation: node.pinToday && !isSel && !isDim ? "pinPulse 3s ease-in-out infinite" : "none", transition: (dragState && dragState.origins && dragState.origins[node.id]) ? "none" : "box-shadow 0.15s, opacity 0.15s", cursor: connectingFrom ? "crosshair" : (dragState && dragState.origins && dragState.origins[node.id]) ? "grabbing" : "grab" }}>
               {node.resolved && <div style={{ position: "absolute", top: -8, right: -8, width: 20, height: 20, borderRadius: 10, background: "#22c55e", color: "#000", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2, boxShadow: "0 2px 6px rgba(34,197,94,0.4)" }}>✓</div>}
+              {node.pinToday && !node.resolved && <div style={{ position: "absolute", top: -8, right: node.resolved ? -30 : -8, width: 20, height: 20, borderRadius: 10, background: "#f59e0b", color: "#000", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2, boxShadow: "0 2px 6px rgba(245,158,11,0.4)" }}>◉</div>}
               <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: node.collapsed ? "none" : `1px solid ${co.border}30`, minHeight: 34 }}>
                 {kids > 0 && <button onClick={(e) => { e.stopPropagation(); setViewParentId(node.id); setOffset({ x: 0, y: 0 }); const ch = nodes.filter((n) => n.parentId === node.id).sort((a, b) => (a.y - b.y) || (a.x - b.x)); setSelectedId(ch.length > 0 ? ch[0].id : null); }} style={{ background: co.accent + "25", border: `1px solid ${co.accent}40`, color: co.accent, fontSize: 10, borderRadius: 3, padding: "1px 5px", cursor: "pointer", fontFamily: F, flexShrink: 0 }}>{kids}</button>}
                 {rc > 0 && <span style={{ background: SM.ready.color + "20", border: `1px solid ${SM.ready.color}40`, color: SM.ready.color, fontSize: 10, borderRadius: 3, padding: "1px 5px", fontFamily: F, flexShrink: 0 }}>{rc}</span>}
@@ -1108,6 +1132,7 @@ function Workspace() {
                       });
                     }
                   }} style={{ background: node.resolved ? "#22c55e20" : co.text + "08", border: "none", borderRadius: 4, color: node.resolved ? "#22c55e" : co.text + "60", cursor: "pointer", fontSize: 11, padding: "4px 6px", lineHeight: 1, fontFamily: F }}>{node.resolved ? "✓" : "✓"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); updateNode(node.id, { pinToday: !node.pinToday }); }} style={{ background: node.pinToday ? "#f59e0b20" : co.text + "08", border: "none", borderRadius: 4, color: node.pinToday ? "#f59e0b" : co.text + "60", cursor: "pointer", fontSize: 11, padding: "4px 6px", lineHeight: 1, fontFamily: F }}>◉</button>
                   <button onClick={(e) => { e.stopPropagation(); deleteNode(node.id); }} style={{ background: "#ef444410", border: "none", borderRadius: 4, color: "#ef444460", cursor: "pointer", fontSize: 12, padding: "4px 6px", lineHeight: 1 }}>×</button>
                 </div>}
               </div>
