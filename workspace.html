@@ -185,6 +185,14 @@ const STORE = getStoreKey();
 const KEYS_STORE = "ws-keys-v1";
 const F = "'JetBrains Mono','SF Mono','Fira Code','Consolas',monospace";
 
+const NODE_TEMPLATES = [
+  { name: "Bug", icon: "🐛", colorIdx: 5, tasks: [{ text: "Reproduce", status: "ready" }, { text: "Identify cause", status: "ready" }, { text: "Fix", status: "blocked", blockReason: "" }, { text: "Verify fix", status: "blocked", blockReason: "" }] },
+  { name: "Feature", icon: "⚡", colorIdx: 3, tasks: [{ text: "Define scope", status: "ready" }, { text: "Implement", status: "blocked", blockReason: "" }, { text: "Test", status: "blocked", blockReason: "" }] },
+  { name: "Spike", icon: "🔍", colorIdx: 4, tasks: [{ text: "Gather context", status: "ready" }, { text: "Explore", status: "blocked", blockReason: "" }, { text: "Document findings", status: "blocked", blockReason: "" }] },
+  { name: "Note", icon: "📝", colorIdx: 0, tasks: [] },
+  { name: "Blocker", icon: "🚧", colorIdx: 1, tasks: [{ text: "Identify dependency", status: "ready" }, { text: "Resolve or escalate", status: "blocked", blockReason: "" }] },
+];
+
 const DEFAULT_KEYS = {
   goUp: { key: "Tab", mod: "", label: "go up a level" },
   child: { key: "Enter", mod: "meta", label: "create child node" },
@@ -196,6 +204,7 @@ const DEFAULT_KEYS = {
   drillIn: { key: "Enter", mod: "", label: "drill into node" },
   focus: { key: ".", mod: "", label: "focus mode" },
   decompose: { key: "d", mod: "", label: "decompose" },
+  templates: { key: "t", mod: "", label: "templates" },
 };
 
 const modLabel = (mod) => { if (!mod) return ""; if (mod === "meta") return navigator.platform?.includes("Mac") ? "⌘+" : "ctrl+"; if (mod === "shift") return "shift+"; return mod + "+"; };
@@ -251,6 +260,7 @@ function Workspace() {
   const [radialTarget, setRadialTarget] = useState(null);
   const [radialHover, setRadialHover] = useState(null);
   const [removeLevelProx, setRemoveLevelProx] = useState(0);
+  const [templatePicker, setTemplatePicker] = useState(false);
   const jiggleRef = useRef({ positions: [], jiggling: false, lastCheck: 0 });
   const [focusNodeId, setFocusNodeId] = useState(null);
   const [focusStart, setFocusStart] = useState(null);
@@ -337,6 +347,13 @@ function Workspace() {
   const navigateToNode = useCallback((id) => { const n = nodes.find((x) => x.id === id); if (!n) return; setViewParentId(n.parentId); setSelectedId(n.id); if (canvasRef.current) { const r = canvasRef.current.getBoundingClientRect(); setOffset({ x: r.width / 2 - n.x - 100, y: r.height / 2 - n.y - 30 }); } }, [nodes]);
 
   const addNode = useCallback((pid, x, y, ci) => { const n = { id: uid(), parentId: pid, x, y, title: "", notes: "", colorIdx: ci, collapsed: false, tasks: [], created: Date.now() }; setNodes((p) => [...p, n]); setSelectedId(n.id); setEditingId(n.id); setEditingField("title"); setTimeout(() => titleRef.current?.focus(), 50); return n; }, []);
+  const addFromTemplate = useCallback((tmpl) => {
+    let x = 60, y = 60;
+    if (canvasRef.current) { const r = canvasRef.current.getBoundingClientRect(); x = r.width / 2 - offset.x - 90; y = r.height / 2 - offset.y - 40; }
+    const n = { id: uid(), parentId: viewParentId, x, y, title: "", notes: "", colorIdx: tmpl.colorIdx, collapsed: false, tasks: tmpl.tasks.map((t) => ({ id: uid(), text: t.text, status: t.status, blockReason: t.blockReason || "", completedAt: null })), created: Date.now() };
+    setNodes((p) => [...p, n]); setSelectedId(n.id); setEditingId(n.id); setEditingField("title"); setTemplatePicker(false);
+    setTimeout(() => titleRef.current?.focus(), 50);
+  }, [offset, viewParentId]);
   const updateNode = useCallback((id, u) => setNodes((p) => p.map((n) => n.id === id ? { ...n, ...u } : n)), []);
   const deleteNode = useCallback((id) => { const rm = new Set([id, ...allDescIds(id)]); setNodes((p) => p.filter((n) => !rm.has(n.id))); setConnections((p) => p.filter((c) => !rm.has(c.from) && !rm.has(c.to))); if (selectedId === id) setSelectedId(null); setEditingId(null); }, [allDescIds, selectedId]);
   const promoteNode = useCallback((id) => { const nd = getNode(id); if (!nd || !nd.parentId) return; const p = getNode(nd.parentId); if (!p) return; updateNode(id, { parentId: p.parentId, x: p.x + 220, y: p.y }); }, [getNode, updateNode]);
@@ -589,10 +606,11 @@ function Workspace() {
     const h = (e) => {
       if (remapTarget) return;
       const ae = document.activeElement; const isTyping = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.contentEditable === "true");
-      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId || decomposeOpen || editingConIdx !== null || isTyping;
+      const busy = editingId || searchOpen || taskInputNodeId || editingTaskId || editingBlockReason || remapOpen || focusNodeId || decomposeOpen || editingConIdx !== null || isTyping || templatePicker;
       if (matchBind(e, keyBindings.find)) { e.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }
       if (e.key === "Escape") {
         if (editingConIdx !== null) { setEditingConIdx(null); }
+        else if (templatePicker) { setTemplatePicker(false); }
         else if (decomposeOpen) {
           e.preventDefault(); e.stopPropagation();
           const hasWork = decomposeNodes.length > 0 || decomposeText.trim().length > 0 || decomposeChat.length > 0;
@@ -620,6 +638,7 @@ function Workspace() {
           if (matchBind(e, keyBindings.focus)) { e.preventDefault(); enterFocus(selectedId); }
         }
         if (matchBind(e, keyBindings.decompose) && !busy) { e.preventDefault(); setDecomposeOpen(true); setDecomposeMode("manual"); setDecomposeText(""); setDecomposeContext(""); setDecomposeChat([]); setDecomposeNodes([]); setTimeout(() => decomposeRef.current?.focus(), 100); }
+        if (matchBind(e, keyBindings.templates) && !busy) { e.preventDefault(); setTemplatePicker(true); }
         if (e.key === "?" && !busy) { e.preventDefault(); setRemapOpen(!remapOpen); }
         // Arrow key navigation
         if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key) && !busy) {
@@ -674,7 +693,7 @@ function Workspace() {
     const r = [{ label: "new node", key: "dbl-click" }, { label: "navigate", key: "arrows" }];
     if (selectedId) { r.push({ label: keyBindings.child.label, key: fmtBind(keyBindings.child) }); r.push({ label: keyBindings.sibling.label, key: fmtBind(keyBindings.sibling) }); r.push({ label: keyBindings.addTask.label, key: fmtBind(keyBindings.addTask) }); if (nodes.filter((n) => n.parentId === selectedId).length > 0) r.push({ label: keyBindings.drillIn.label, key: fmtBind(keyBindings.drillIn) }); r.push({ label: keyBindings.focus.label, key: fmtBind(keyBindings.focus) }); r.push({ label: keyBindings.promote.label, key: fmtBind(keyBindings.promote) }); r.push({ label: keyBindings.demote.label, key: fmtBind(keyBindings.demote) }); }
     if (viewParentId) r.push({ label: keyBindings.goUp.label, key: fmtBind(keyBindings.goUp) });
-    r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: keyBindings.decompose.label, key: fmtBind(keyBindings.decompose) }); r.push({ label: "settings", key: "?" });
+    r.push({ label: keyBindings.find.label, key: fmtBind(keyBindings.find) }); r.push({ label: keyBindings.decompose.label, key: fmtBind(keyBindings.decompose) }); r.push({ label: keyBindings.templates.label, key: fmtBind(keyBindings.templates) }); r.push({ label: "settings", key: "?" });
     return r;
   }, [selectedId, editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, keyBindings, nodes, remapOpen, focusNodeId]);
 
@@ -862,6 +881,31 @@ function Workspace() {
           );
         })}
       </div>
+
+      {/* Template Picker */}
+      {templatePicker && !focusNodeId && !decomposeOpen && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#0a0a0b90", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setTemplatePicker(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#111113", border: "1px solid #252528", borderRadius: 10, padding: "16px 20px", maxWidth: 400, width: "90%", boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
+            <div style={{ color: "#888", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>new from template</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {NODE_TEMPLATES.map((tmpl, i) => {
+                const co = COLORS[tmpl.colorIdx];
+                return (
+                  <button key={i} onClick={() => addFromTemplate(tmpl)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: co.bg, border: `1px solid ${co.border}60`, borderRadius: 8, cursor: "pointer", textAlign: "left", fontFamily: F, transition: "border-color 0.1s" }} onMouseEnter={(e) => e.currentTarget.style.borderColor = co.accent} onMouseLeave={(e) => e.currentTarget.style.borderColor = co.border + "60"}>
+                    <span style={{ fontSize: 18, flexShrink: 0 }}>{tmpl.icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ color: co.text, fontSize: 13, fontWeight: 600 }}>{tmpl.name}</div>
+                      {tmpl.tasks.length > 0 && <div style={{ color: co.text + "50", fontSize: 10, marginTop: 2 }}>{tmpl.tasks.map((t) => t.text).join(" → ")}</div>}
+                    </div>
+                    <span style={{ color: co.accent + "60", fontSize: 10 }}>{tmpl.tasks.length} tasks</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ color: "#333", fontSize: 10, textAlign: "center", marginTop: 10 }}>esc to cancel</div>
+          </div>
+        </div>
+      )}
 
       {/* Decompose Overlay */}
       {decomposeOpen && (
