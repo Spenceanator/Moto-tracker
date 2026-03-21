@@ -21,6 +21,7 @@
   ::selection { background: #3b82f640; color: #e2e8f0; }
   input::placeholder, textarea::placeholder { opacity: 0.5; }
   @keyframes flowDash { to { stroke-dashoffset: -20; } }
+  @keyframes pulse { 0%,100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }
 </style>
 </head>
 <body>
@@ -247,6 +248,10 @@ function Workspace() {
   const [decomposeNodes, setDecomposeNodes] = useState([]);
   const [decomposeConfirmClose, setDecomposeConfirmClose] = useState(false);
   const [multiSelect, setMultiSelect] = useState(new Set());
+  const [radialTarget, setRadialTarget] = useState(null);
+  const [radialHover, setRadialHover] = useState(null);
+  const [removeLevelProx, setRemoveLevelProx] = useState(0);
+  const jiggleRef = useRef({ positions: [], jiggling: false, lastCheck: 0 });
   const [focusNodeId, setFocusNodeId] = useState(null);
   const [focusStart, setFocusStart] = useState(null);
   const [focusMicroStep, setFocusMicroStep] = useState("");
@@ -401,7 +406,105 @@ function Workspace() {
     setDragState({ id: nid, ids: dragIds, sx: e.clientX, sy: e.clientY, origins });
   }, [nodes, connectingFrom, multiSelect]);
 
-  useEffect(() => { const mv = (e) => { if (dragState) { const ddx = e.clientX - dragState.sx, ddy = e.clientY - dragState.sy; setNodes((p) => p.map((n) => { if (dragState.origins && dragState.origins[n.id]) return { ...n, x: dragState.origins[n.id].x + ddx, y: dragState.origins[n.id].y + ddy }; return n; })); } if (isPanning && panStart) setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); }; const up = () => { setDragState(null); setIsPanning(false); setPanStart(null); }; window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up); return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); }; }, [dragState, isPanning, panStart]);
+  useEffect(() => {
+    const mv = (e) => {
+      if (dragState) {
+        const ddx = e.clientX - dragState.sx, ddy = e.clientY - dragState.sy;
+        setNodes((p) => p.map((n) => { if (dragState.origins && dragState.origins[n.id]) return { ...n, x: dragState.origins[n.id].x + ddx, y: dragState.origins[n.id].y + ddy }; return n; }));
+
+        // Jiggle detection
+        const now = Date.now();
+        const jr = jiggleRef.current;
+        jr.positions.push({ x: e.clientX, y: e.clientY, t: now });
+        // Keep last 500ms
+        jr.positions = jr.positions.filter((p) => now - p.t < 500);
+        if (jr.positions.length >= 6 && now - jr.lastCheck > 100) {
+          jr.lastCheck = now;
+          let reversals = 0;
+          for (let i = 2; i < jr.positions.length; i++) {
+            const dx1 = jr.positions[i-1].x - jr.positions[i-2].x;
+            const dx2 = jr.positions[i].x - jr.positions[i-1].x;
+            const dy1 = jr.positions[i-1].y - jr.positions[i-2].y;
+            const dy2 = jr.positions[i].y - jr.positions[i-1].y;
+            if ((dx1 > 3 && dx2 < -3) || (dx1 < -3 && dx2 > 3) || (dy1 > 3 && dy2 < -3) || (dy1 < -3 && dy2 > 3)) reversals++;
+          }
+          jr.jiggling = reversals >= 3;
+        }
+
+        // Check overlap with other visible nodes
+        const draggedNode = nodes.find((n) => n.id === dragState.id);
+        if (draggedNode && jr.jiggling) {
+          const dragX = draggedNode.x + 90, dragY = draggedNode.y + 40;
+          const vis = nodes.filter((n) => n.parentId === viewParentId && n.id !== dragState.id);
+          let closest = null, closestDist = Infinity;
+          vis.forEach((n) => {
+            const nx = n.x + 90, ny = n.y + 40;
+            const d = Math.sqrt((dragX - nx) ** 2 + (dragY - ny) ** 2);
+            if (d < 120 && d < closestDist) { closestDist = d; closest = n; }
+          });
+          if (closest) { setRadialTarget(closest.id); } else { setRadialTarget(null); }
+        } else if (!jr.jiggling) { setRadialTarget(null); }
+
+        // Remove-level proximity (lower quarter center)
+        if (viewParentId && canvasRef.current) {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const bx = rect.left + rect.width / 2, by = rect.top + rect.height * 0.85;
+          const dist = Math.sqrt((e.clientX - bx) ** 2 + (e.clientY - by) ** 2);
+          const prox = Math.max(0, Math.min(1, 1 - dist / 200));
+          setRemoveLevelProx(prox);
+        }
+      }
+      if (isPanning && panStart) setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+    };
+    const up = (e) => {
+      if (dragState) {
+        // Check radial drop
+        if (radialTarget && radialHover) {
+          const heldId = dragState.id;
+          const targetId = radialTarget;
+          if (radialHover === "child") {
+            // Held becomes child of target
+            const existing = nodes.filter((n) => n.parentId === targetId);
+            setNodes((p) => p.map((n) => n.id === heldId ? { ...n, parentId: targetId, x: 60, y: 60 + existing.length * 90 } : n));
+            setViewParentId(targetId); setOffset({ x: 0, y: 0 }); setSelectedId(heldId);
+          } else if (radialHover === "parent") {
+            // Held becomes parent of target — target becomes child of held
+            const tgt = nodes.find((n) => n.id === targetId);
+            const held = nodes.find((n) => n.id === heldId);
+            if (tgt && held) {
+              const existingKids = nodes.filter((n) => n.parentId === heldId);
+              setNodes((p) => p.map((n) => {
+                if (n.id === targetId) return { ...n, parentId: heldId, x: 60, y: 60 + existingKids.length * 90 };
+                if (n.id === heldId) return { ...n, x: tgt.x, y: tgt.y };
+                return n;
+              }));
+              setViewParentId(heldId); setOffset({ x: 0, y: 0 }); setSelectedId(targetId);
+            }
+          } else if (radialHover === "connect") {
+            setConnections((p) => { const ex = p.some((c) => c.from === heldId && c.to === targetId); if (ex) return p; return [...p, { from: heldId, to: targetId, label: "" }]; });
+            // Snap back
+            if (dragState.origins[heldId]) setNodes((p) => p.map((n) => n.id === heldId ? { ...n, x: dragState.origins[heldId].x, y: dragState.origins[heldId].y } : n));
+          } else if (radialHover === "connectrev") {
+            setConnections((p) => { const ex = p.some((c) => c.from === targetId && c.to === heldId); if (ex) return p; return [...p, { from: targetId, to: heldId, label: "" }]; });
+            if (dragState.origins[heldId]) setNodes((p) => p.map((n) => n.id === heldId ? { ...n, x: dragState.origins[heldId].x, y: dragState.origins[heldId].y } : n));
+          }
+        }
+        // Check remove-level drop
+        else if (viewParentId && removeLevelProx > 0.5) {
+          const heldId = dragState.id;
+          const parent = nodes.find((n) => n.id === viewParentId);
+          const grandParent = parent ? parent.parentId : null;
+          setNodes((p) => p.map((n) => n.id === heldId ? { ...n, parentId: grandParent, x: parent ? parent.x + 220 : 60, y: parent ? parent.y : 60 } : n));
+          setViewParentId(grandParent); setOffset({ x: 0, y: 0 }); setSelectedId(heldId);
+        }
+        jiggleRef.current = { positions: [], jiggling: false, lastCheck: 0 };
+        setRadialTarget(null); setRadialHover(null); setRemoveLevelProx(0);
+      }
+      setDragState(null); setIsPanning(false); setPanStart(null);
+    };
+    window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
+  }, [dragState, isPanning, panStart, nodes, viewParentId, radialTarget, radialHover, removeLevelProx]);
 
   // Touch handlers
   const touchRef = useRef({ dragging: null, panning: false, startX: 0, startY: 0, lastTap: 0 });
@@ -962,6 +1065,50 @@ First task on the first component should be the smallest possible physical actio
         </div>
       </div>}
       {!legendVisible && <button onClick={() => setLegendVisible(true)} style={{ position: "fixed", bottom: momentumPct > 0 ? 18 : 10, right: 10, background: "#111113", border: "1px solid #1a1a1c", color: "#404040", fontSize: 10, padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontFamily: F, zIndex: 100 }}>?</button>}
+
+      {/* Radial Menu */}
+      {radialTarget && dragState && (() => {
+        const tn = nodes.find((n) => n.id === radialTarget);
+        if (!tn) return null;
+        const cx = tn.x + 90 + offset.x + panelW, cy = tn.y + 40 + offset.y + 80;
+        const r = 60;
+        const opts = [
+          { id: "parent", label: "↑ parent", angle: -90, color: "#a855f7" },
+          { id: "child", label: "↓ child", angle: 90, color: "#3b82f6" },
+          { id: "connect", label: "→ connect", angle: 0, color: "#22c55e" },
+          { id: "connectrev", label: "← connect", angle: 180, color: "#f59e0b" },
+        ];
+        return (
+          <div style={{ position: "absolute", left: cx, top: cy, zIndex: 200, pointerEvents: "none" }}>
+            <div style={{ position: "absolute", left: -40, top: -40, width: 80, height: 80, borderRadius: "50%", border: "2px solid #f59e0b40", background: "#f59e0b08", animation: "pulse 1s ease infinite" }} />
+            {opts.map((o) => {
+              const rad = (o.angle * Math.PI) / 180;
+              const ox = Math.cos(rad) * r, oy = Math.sin(rad) * r;
+              const isHov = radialHover === o.id;
+              return (
+                <div key={o.id}
+                  onMouseEnter={() => setRadialHover(o.id)}
+                  onMouseLeave={() => setRadialHover(null)}
+                  style={{ position: "absolute", left: ox - 36, top: oy - 14, width: 72, height: 28, display: "flex", alignItems: "center", justifyContent: "center", background: isHov ? o.color + "30" : "#111113e0", border: `1px solid ${isHov ? o.color + "80" : o.color + "30"}`, borderRadius: 6, color: isHov ? o.color : o.color + "90", fontSize: 10, fontWeight: 600, fontFamily: F, cursor: "pointer", pointerEvents: "auto", transition: "all 0.1s", transform: isHov ? "scale(1.1)" : "scale(1)" }}>{o.label}</div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {/* Remove Level Bubble */}
+      {dragState && viewParentId && (() => {
+        const scale = 0.6 + removeLevelProx * 0.6;
+        const opacity = 0.2 + removeLevelProx * 0.8;
+        const glowing = removeLevelProx > 0.5;
+        return (
+          <div style={{ position: "fixed", bottom: "12%", left: "50%", transform: `translateX(-50%) scale(${scale})`, zIndex: 200, pointerEvents: "none", transition: "transform 0.15s ease-out, opacity 0.15s" }}>
+            <div style={{ padding: "12px 24px", background: glowing ? "#ef444430" : "#111113e0", border: `2px solid ${glowing ? "#ef4444" : "#333"}`, borderRadius: 12, color: glowing ? "#ef4444" : "#666", fontSize: 12, fontWeight: 700, fontFamily: F, textAlign: "center", opacity, boxShadow: glowing ? "0 0 24px #ef444430" : "none", transition: "all 0.15s" }}>
+              ↑ remove from level
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Momentum Strip */}
       {!focusNodeId && (todayDoneCount > 0 || todayFocusMins > 0) && (
