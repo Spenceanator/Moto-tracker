@@ -1194,14 +1194,13 @@ function rClientView(){
   root.append(jSec);
 
   // Quick add job for this client
-  root.append(h("button",{class:"bg",style:{borderColor:"rgba(34,211,238,0.3)"},onClick:function(){
+  var njBtn=h("button",{class:"bg",style:{borderColor:"rgba(34,211,238,0.3)"},onClick:function(){
     nav("home");hTab="jobs";ui.addJob=1;
-    // Pre-select this customer in the form on next render
     setTimeout(function(){
       var chips=document.querySelectorAll(".chip");
       chips.forEach(function(chip){if(chip.textContent.indexOf(cust.name)===0)chip.click()})
     },100);
-  }},I.plus+" New job for "+cust.name));
+  }});njBtn.innerHTML=I.plus+" New job for "+cust.name;root.append(njBtn);
 
   // Delete
   if(ui.cfDel===cust.id){
