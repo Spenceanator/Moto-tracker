@@ -716,6 +716,24 @@ function Workspace() {
   }, [editingId, searchOpen, taskInputNodeId, editingTaskId, editingBlockReason, viewParentId, getNode, selectedId, quickSibling, quickChild, nodes, startAddTask, stopAddTask, commitEditTask, commitBlock, promoteNode, demoteNode, keyBindings, remapOpen, remapTarget, focusNodeId, enterFocus, exitFocus, decomposeOpen, decomposeConfirmClose, decomposeNodes, decomposeText, decomposeChat]);
 
   const getCenter = useCallback((id) => { const n = nodes.find((x) => x.id === id); return n ? { x: n.x + 100, y: n.y + 28 } : { x: 0, y: 0 }; }, [nodes]);
+  const getPort = useCallback((fromId, toId) => {
+    const fn = nodes.find((x) => x.id === fromId), tn = nodes.find((x) => x.id === toId);
+    if (!fn || !tn) return { fx: 0, fy: 0, tx: 0, ty: 0, fDir: "r", tDir: "l" };
+    const fw = 180, fh = 60;
+    const fcx = fn.x + fw / 2, fcy = fn.y + fh / 2, tcx = tn.x + fw / 2, tcy = tn.y + fh / 2;
+    const dx = tcx - fcx, dy = tcy - fcy;
+    let fDir, tDir;
+    if (Math.abs(dx) > Math.abs(dy)) { fDir = dx > 0 ? "r" : "l"; tDir = dx > 0 ? "l" : "r"; }
+    else { fDir = dy > 0 ? "b" : "t"; tDir = dy > 0 ? "t" : "b"; }
+    const port = (n, dir) => {
+      if (dir === "r") return { x: n.x + fw, y: n.y + fh / 2 };
+      if (dir === "l") return { x: n.x, y: n.y + fh / 2 };
+      if (dir === "b") return { x: n.x + fw / 2, y: n.y + fh };
+      return { x: n.x + fw / 2, y: n.y };
+    };
+    const fp = port(fn, fDir), tp = port(tn, tDir);
+    return { fx: fp.x, fy: fp.y, tx: tp.x, ty: tp.y, fDir, tDir };
+  }, [nodes]);
   const visIds = new Set(visibleNodes.map((n) => n.id));
   const visCon = connections.filter((c) => visIds.has(c.from) && visIds.has(c.to));
   const searchIds = new Set(searchResults.map((n) => n.id));
@@ -838,49 +856,53 @@ function Workspace() {
       <div ref={canvasRef} className="ci" style={{ position: "absolute", top: 80, left: panelW, right: 0, bottom: 0, overflow: "hidden", transition: "left 0.2s", touchAction: "none" }} onDoubleClick={handleCanvasDblClick} onMouseDown={handleCanvasMouseDown} onTouchStart={handleCanvasTouchStart} onMouseMove={(e) => { if (!dragState && !isPanning) mousePos.current = { x: e.clientX, y: e.clientY }; }}>
         <div className="ci" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `radial-gradient(circle, ${gridC} 1px, transparent 1px)`, backgroundSize: "40px 40px", backgroundPosition: `${offset.x % 40}px ${offset.y % 40}px`, pointerEvents: "none" }} />
         <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }}>
-          {visCon.map((c, ci) => { const f = getCenter(c.from), t = getCenter(c.to); const lc = vc ? vc.accent + "70" : "#666"; const llc = vc ? vc.accent + "b0" : "#aaa";
-            const fx = f.x + offset.x, fy = f.y + offset.y, tx = t.x + offset.x, ty = t.y + offset.y;
-            const ddx = tx - fx, ddy = ty - fy, len = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
-            const ux = ddx / len, uy = ddy / len;
-            // Check for reverse connection (bidirectional)
+          {visCon.map((c, ci) => { const p = getPort(c.from, c.to); const lc = vc ? vc.accent + "70" : "#666"; const llc = vc ? vc.accent + "b0" : "#aaa";
+            const ox = offset.x, oy = offset.y;
+            let fx = p.fx + ox, fy = p.fy + oy, tx = p.tx + ox, ty = p.ty + oy;
+            // Bidirectional offset
             const hasReverse = visCon.some((o, oi) => oi !== ci && o.from === c.to && o.to === c.from);
-            const curveDir = hasReverse ? (c.from < c.to ? 1 : -1) : 0;
-            const curve = curveDir * Math.min(len * 0.2, 40);
-            const cpx = (fx + tx) / 2 + uy * curve, cpy = (fy + ty) / 2 - ux * curve;
-            const mx = hasReverse ? cpx : (fx + tx) / 2, my = hasReverse ? cpy : (fy + ty) / 2;
-            const pathD = hasReverse ? `M${fx},${fy} Q${cpx},${cpy} ${tx},${ty}` : `M${fx},${fy} L${tx},${ty}`;
+            if (hasReverse) {
+              const perp = p.fDir === "r" || p.fDir === "l" ? { x: 0, y: c.from < c.to ? -8 : 8 } : { x: c.from < c.to ? -8 : 8, y: 0 };
+              fx += perp.x; fy += perp.y; tx += perp.x; ty += perp.y;
+            }
+            // Control points extend perpendicular from edge
+            const ext = Math.min(Math.sqrt((tx - fx) ** 2 + (ty - fy) ** 2) * 0.4, 80);
+            const dirVec = { r: { x: ext, y: 0 }, l: { x: -ext, y: 0 }, b: { x: 0, y: ext }, t: { x: 0, y: -ext } };
+            const fc = dirVec[p.fDir], tc = dirVec[p.tDir];
+            const c1x = fx + fc.x, c1y = fy + fc.y, c2x = tx + tc.x, c2y = ty + tc.y;
+            const pathD = `M${fx},${fy} C${c1x},${c1y} ${c2x},${c2y} ${tx},${ty}`;
             const pathId = "con-" + ci;
+            const mx = (fx + tx) / 2, my = (fy + ty) / 2;
             const isEditing = editingConIdx === ci;
-            // Arrow tip
-            const aLen = 14, aW = 7;
-            const tipDist = 4;
-            let tipUx = ux, tipUy = uy;
-            if (hasReverse) { const dt = 0.95; const bx = (1-dt)*(1-dt)*fx + 2*(1-dt)*dt*cpx + dt*dt*tx; const by = (1-dt)*(1-dt)*fy + 2*(1-dt)*dt*cpy + dt*dt*ty; const bx2 = (1-0.9)*(1-0.9)*fx + 2*(1-0.9)*0.9*cpx + 0.9*0.9*tx; const by2 = (1-0.9)*(1-0.9)*fy + 2*(1-0.9)*0.9*cpy + 0.9*0.9*ty; const tl = Math.sqrt((bx-bx2)**2+(by-by2)**2)||1; tipUx=(bx-bx2)/tl; tipUy=(by-by2)/tl; }
-            const tipX = tx - tipUx * tipDist, tipY = ty - tipUy * tipDist;
-            const p1x = tipX - tipUx * aLen + tipUy * aW, p1y = tipY - tipUy * aLen - tipUx * aW;
-            const p2x = tipX - tipUx * aLen - tipUy * aW, p2y = tipY - tipUy * aLen + tipUx * aW;
+            // End arrowhead direction from curve tangent at t=1
+            const tux = tx - c2x, tuy = ty - c2y;
+            const tl = Math.sqrt(tux * tux + tuy * tuy) || 1;
+            const nux = tux / tl, nuy = tuy / tl;
+            const al = 10, aw = 5;
+            const ap1x = tx - nux * al + nuy * aw, ap1y = ty - nuy * al - nux * aw;
+            const ap2x = tx - nux * al - nuy * aw, ap2y = ty - nuy * al + nux * aw;
             return (<g key={ci}>
-              <path d={pathD} stroke={lc} strokeWidth="2" fill="none" strokeOpacity="0.4" />
-              <circle cx={fx} cy={fy} r="4" fill={lc} stroke="none" />
-              <path d={`M${tipX},${tipY}L${p1x},${p1y}L${p2x},${p2y}Z`} fill={lc} stroke="none" />
+              <path d={pathD} stroke={lc} strokeWidth="1.5" fill="none" strokeOpacity="0.35" />
+              <circle cx={fx} cy={fy} r="3" fill={lc} stroke="none" />
+              <path d={`M${tx},${ty}L${ap1x},${ap1y}L${ap2x},${ap2y}Z`} fill={lc} stroke="none" />
               <path id={pathId} d={pathD} fill="none" stroke="none" />
-              <polygon points="-4,-3 4,0 -4,3" fill={lc} opacity="0.9">
-                <animateMotion dur="2s" repeatCount="indefinite"><mpath xlinkHref={"#" + pathId} /></animateMotion>
+              <polygon points="-4,-2.5 4,0 -4,2.5" fill={lc} opacity="0.8">
+                <animateMotion dur="2.5s" rotate="auto" repeatCount="indefinite"><mpath xlinkHref={"#" + pathId} /></animateMotion>
               </polygon>
-              <polygon points="-3,-2 3,0 -3,2" fill={lc} opacity="0.6">
-                <animateMotion dur="2s" begin="1s" repeatCount="indefinite"><mpath xlinkHref={"#" + pathId} /></animateMotion>
+              <polygon points="-3,-2 3,0 -3,2" fill={lc} opacity="0.5">
+                <animateMotion dur="2.5s" rotate="auto" begin="1.25s" repeatCount="indefinite"><mpath xlinkHref={"#" + pathId} /></animateMotion>
               </polygon>
               {c.label && !isEditing && <><rect x={mx - (c.label.length * 3.2) - 6} y={my - 17} width={(c.label.length * 6.4) + 12} height={16} rx="4" fill="#0a0a0be0" stroke={lc} strokeWidth="0.5" />
                 <text x={mx} y={my - 6} fill={llc} fontSize="10" fontFamily={F} textAnchor="middle" fontWeight="600" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setEditingConIdx(ci); setConLabelText(c.label); setTimeout(() => conLabelRef.current?.focus(), 50); }}>{c.label}</text></>}
-              <path d={pathD} stroke="transparent" strokeWidth="20" fill="none" style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                onClick={(e) => { e.stopPropagation(); if (e.shiftKey) { const o = visCon[ci]; setConnections((p) => p.filter((x) => !(x.from === o.from && x.to === o.to))); } else { setEditingConIdx(ci); setConLabelText(c.label || ""); setTimeout(() => conLabelRef.current?.focus(), 50); } }} />
+              <path d={pathD} stroke="transparent" strokeWidth="16" fill="none" style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                onClick={(e) => { e.stopPropagation(); if (e.shiftKey) { const o = visCon[ci]; setConnections((pp) => pp.filter((x) => !(x.from === o.from && x.to === o.to))); } else { setEditingConIdx(ci); setConLabelText(c.label || ""); setTimeout(() => conLabelRef.current?.focus(), 50); } }} />
             </g>); })}
         </svg>
 
         {/* Connection label editor */}
         {editingConIdx !== null && visCon[editingConIdx] && (() => {
-          const ec = visCon[editingConIdx]; const ef = getCenter(ec.from), et = getCenter(ec.to);
-          const emx = (ef.x + et.x) / 2 + offset.x, emy = (ef.y + et.y) / 2 + offset.y - 20;
+          const ec = visCon[editingConIdx]; const ep = getPort(ec.from, ec.to);
+          const emx = (ep.fx + ep.tx) / 2 + offset.x, emy = (ep.fy + ep.ty) / 2 + offset.y - 20;
           return <div style={{ position: "absolute", left: emx - 80, top: emy - 14, zIndex: 60, display: "flex", gap: 4, alignItems: "center" }} onMouseDown={(e) => e.stopPropagation()}>
             <input ref={conLabelRef} value={conLabelText} onChange={(e) => setConLabelText(e.target.value)} placeholder="label..." onKeyDown={(e) => {
               if (e.key === "Enter") { setConnections((p) => p.map((x, xi) => { const ri = connections.indexOf(visCon[editingConIdx]); return xi === ri ? { ...x, label: conLabelText.trim() } : x; })); setEditingConIdx(null); }
