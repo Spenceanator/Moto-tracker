@@ -590,6 +590,14 @@ function Workspace() {
     const r = canvasRef.current.getBoundingClientRect();
     lerpTo(r.width / 2 - n.x - 90, r.height / 2 - n.y - 40);
   }, [lerpTo]);
+
+  // Auto-center on selected node
+  useEffect(() => {
+    if (!selectedId || dragState || isPanning) return;
+    const nd = nodes.find((n) => n.id === selectedId);
+    if (nd) centerOnNode(nd);
+  }, [selectedId]);
+
   const isMobile = typeof window !== "undefined" && (("ontouchstart" in window) || window.innerWidth < 768);
 
   const fieldKey = useCallback((e, nid, field) => {
