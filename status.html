@@ -24,6 +24,15 @@
   .task-icon{font-size:10px;flex-shrink:0}
   .task-text{flex:1}
   .note{padding:12px;background:rgba(34,211,238,0.04);border:1px solid rgba(34,211,238,0.12);border-radius:8px;color:var(--dim);font-size:13px;line-height:1.5;white-space:pre-wrap}
+  .chat-wrap{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;padding:4px 0}
+  .msg{max-width:85%;padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.4;word-wrap:break-word}
+  .msg-cust{align-self:flex-end;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.2);color:var(--text)}
+  .msg-mech{align-self:flex-start;background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.15);color:var(--text)}
+  .msg-time{font-size:9px;color:var(--muted);margin-top:2px}
+  .chat-input{display:flex;gap:8px}
+  .chat-input textarea{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:12px;padding:10px;resize:none;outline:none}
+  .chat-input textarea:focus{border-color:var(--amber)}
+  .chat-send{background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:var(--amber);font-size:12px;font-weight:700;padding:10px 16px;cursor:pointer;font-family:var(--font)}
   .meta{color:var(--muted);font-size:11px}
   .loading{text-align:center;color:var(--muted);font-size:13px;padding:40px}
   .error{text-align:center;padding:40px 20px}
@@ -148,6 +157,28 @@ function render(job){
     photoSec.appendChild(pgrid);root.appendChild(photoSec);
   }
 
+  // Chat
+  var chatSec=document.createElement("div");chatSec.className="card";
+  var chatLabel=document.createElement("span");chatLabel.className="section-label";chatLabel.textContent="Messages";
+  chatSec.appendChild(chatLabel);
+  var chatWrap=document.createElement("div");chatWrap.className="chat-wrap";chatWrap.id="chat-messages";
+  chatSec.appendChild(chatWrap);
+  var chatInput=document.createElement("div");chatInput.className="chat-input";
+  var chatTa=document.createElement("textarea");chatTa.rows=2;chatTa.placeholder="Type a message...";
+  var chatBtn=document.createElement("button");chatBtn.className="chat-send";chatBtn.textContent="Send";
+  chatBtn.onclick=function(){
+    var msg=chatTa.value.trim();if(!msg)return;
+    chatBtn.disabled=true;chatBtn.textContent="...";
+    fetch(SB_URL+"/rest/v1/job_chat",{method:"POST",headers:{"apikey":SB_KEY,"Content-Type":"application/json","Prefer":"return=minimal"},
+      body:JSON.stringify({token:getToken(),sender:"customer",message:msg})
+    }).then(function(){chatTa.value="";loadChat()}).catch(function(){}).finally(function(){chatBtn.disabled=false;chatBtn.textContent="Send"});
+  };
+  chatTa.onkeydown=function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();chatBtn.click()}};
+  chatInput.appendChild(chatTa);chatInput.appendChild(chatBtn);
+  chatSec.appendChild(chatInput);root.appendChild(chatSec);
+
+  loadChat();
+
   // Updated
   if(job.updated_at){
     var meta=document.createElement("span");meta.className="meta";meta.style.textAlign="center";
@@ -184,6 +215,25 @@ function load(){
   }).catch(function(e){showError("Could not load job status. Try again later.")});
 }
 
+function loadChat(){
+  var token=getToken();if(!token)return;
+  fetch(SB_URL+"/rest/v1/job_chat?token=eq."+token+"&order=created_at.asc",{
+    method:"GET",headers:{"apikey":SB_KEY,"Content-Type":"application/json"}
+  }).then(function(r){return r.json()}).then(function(msgs){
+    var wrap=document.getElementById("chat-messages");if(!wrap)return;
+    wrap.innerHTML="";
+    if(!msgs||msgs.length===0){wrap.innerHTML='<span style="color:#444;font-size:11px;text-align:center;padding:12px">No messages yet</span>';return}
+    msgs.forEach(function(m){
+      var div=document.createElement("div");div.className="msg "+(m.sender==="customer"?"msg-cust":"msg-mech");
+      var text=document.createElement("div");text.textContent=m.message;div.appendChild(text);
+      var time=document.createElement("div");time.className="msg-time";
+      time.textContent=(m.sender==="customer"?"You":"Drydock")+" · "+new Date(m.created_at).toLocaleString();
+      div.appendChild(time);wrap.appendChild(div);
+    });
+    wrap.scrollTop=wrap.scrollHeight;
+  }).catch(function(){});
+}
+
 load();
 // Auto-refresh every 60s
 setInterval(function(){
@@ -197,6 +247,8 @@ setInterval(function(){
     }
   }).catch(function(){});
 },60000);
+// Poll chat every 15s
+setInterval(function(){loadChat()},15000);
 </script>
 </body>
 </html>

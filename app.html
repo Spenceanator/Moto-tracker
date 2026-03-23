@@ -215,6 +215,28 @@ function logAct(action,detail,entityType,entityId){
   // Cap at 2000 entries
   if(data.activity.length>2000)data.activity=data.activity.slice(-2000);
 }
+function loadJobChat(token){
+  fetch(SB_URL+"/rest/v1/job_chat?token=eq."+token+"&order=created_at.asc",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(msgs){
+    var box=document.getElementById("job-chat-box");if(!box)return;
+    box.innerHTML="";
+    if(!msgs||msgs.length===0){box.innerHTML='<span style="color:#444;font-size:11px;text-align:center;padding:20px">No messages yet. Customer can chat from their status page.</span>';return}
+    msgs.forEach(function(m){
+      var isMech=m.sender==="mechanic";
+      var div=h("div",{style:{alignSelf:isMech?"flex-end":"flex-start",maxWidth:"85%",padding:"8px 12px",borderRadius:"10px",fontSize:"12px",lineHeight:"1.4",wordWrap:"break-word",background:isMech?"rgba(34,211,238,0.08)":"rgba(245,158,11,0.12)",border:isMech?"1px solid rgba(34,211,238,0.15)":"1px solid rgba(245,158,11,0.2)"}});
+      div.append(h("div",null,m.message));
+      div.append(h("div",{style:{fontSize:"9px",color:"#555",marginTop:"2px"}},(isMech?"You":"Customer")+" · "+new Date(m.created_at).toLocaleString()));
+      box.append(div);
+    });
+    box.scrollTop=box.scrollHeight;
+    // Update chat tab label with unread indicator
+    var custMsgs=msgs.filter(function(m){return m.sender==="customer"});
+    if(custMsgs.length>0){
+      var tabs=document.querySelectorAll(".nt");
+      tabs.forEach(function(t){if(t.textContent.indexOf("Chat")===0)t.textContent="Chat ("+custMsgs.length+")"});
+    }
+  }).catch(function(){});
+}
 
 // ============ SUPABASE SYNC ============
 var _syncTimer=null,_syncing=0,_lastPushTs=0,_pollInt=null,_localDirty=0;
@@ -1149,6 +1171,7 @@ function rJobView(){
 
   // Tabs
   var tabs=[{key:"tasks",label:"Tasks",count:ready.length},{key:"notes",label:"Notes"}];
+  if(job.shareToken)tabs.push({key:"chat",label:"Chat"});
   var tsc=h("div",{style:{overflowX:"auto",WebkitOverflowScrolling:"touch",margin:"0 -4px",padding:"0 4px"}});var tb=h("div",{class:"f g4",style:{background:"rgba(255,255,255,0.03)",borderRadius:"8px",padding:"3px",minWidth:"min-content"}});
   tabs.forEach(function(t){tb.append(h("button",{class:"tab"+(ui.bTab===t.key?" a":""),onClick:function(){ui.bTab=t.key;R()}},t.label+(t.count!==undefined?" ("+t.count+")":"")))});tsc.append(tb);root.append(tsc);
 
@@ -1167,6 +1190,27 @@ function rJobView(){
     var pubTa=h("textarea",{rows:"6",placeholder:"Update for the customer...",style:{borderColor:"rgba(34,211,238,0.2)"},onInput:function(e){job.publicNotes=e.target.value;ss()}});pubTa.value=job.publicNotes||"";w.append(pubTa);
     if(job.shareToken)w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)",fontSize:"11px"},onClick:function(){pushJobPublic(job);flash("Status page updated")}},"Push update now"));
     root.append(w)}
+  else if(ui.bTab==="chat"&&job.shareToken){
+    var cw=h("div",{class:"fc g10"});
+    var chatBox=h("div",{id:"job-chat-box",style:{display:"flex",flexDirection:"column",gap:"6px",maxHeight:"400px",overflowY:"auto",padding:"8px",background:"rgba(255,255,255,0.02)",borderRadius:"10px",border:"1px solid #222",minHeight:"120px"}});
+    chatBox.innerHTML='<span style="color:#444;font-size:11px;text-align:center;padding:20px">Loading...</span>';
+    cw.append(chatBox);
+    // Input
+    var chatRow=h("div",{class:"f g8"});
+    var chatIn=h("textarea",{rows:"2",placeholder:"Reply to customer...",style:{flex:1,fontSize:"12px",resize:"none"}});
+    var chatSend=h("button",{class:"bp",style:{padding:"8px 16px",fontSize:"12px",alignSelf:"flex-end"},onClick:function(){
+      var msg=chatIn.value.trim();if(!msg)return;
+      chatSend.disabled=true;chatSend.textContent="...";
+      fetch(SB_URL+"/rest/v1/job_chat",{method:"POST",headers:sbHeaders(),body:JSON.stringify({token:job.shareToken,sender:"mechanic",message:msg})})
+      .then(function(){chatIn.value="";logAct("chat-send",msg.slice(0,40),"job",job.id);loadJobChat(job.shareToken)})
+      .catch(function(){flash("Send failed")})
+      .finally(function(){chatSend.disabled=false;chatSend.textContent="Send"});
+    }});chatSend.textContent="Send";
+    chatIn.onkeydown=function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();chatSend.click()}};
+    chatRow.append(chatIn,chatSend);cw.append(chatRow);
+    root.append(cw);
+    loadJobChat(job.shareToken);
+  }
 
   // Timestamps
   var ts=h("div",{class:"f g12 fw",style:{fontSize:"10px",color:"#555",padding:"8px 0"}});
@@ -1359,8 +1403,8 @@ function rHome(){
       var todayActs=(data.activity||[]).filter(function(a){return new Date(a.ts).toISOString().split("T")[0]===todayStr}).sort(function(a,b){return b.ts-a.ts});
       if(todayActs.length>0){
         var feedW=h("div",{class:"fc g2",style:{marginTop:"6px",maxHeight:"160px",overflowY:"auto",padding:"8px 10px",background:"rgba(245,158,11,0.04)",borderRadius:"8px",border:"1px solid rgba(245,158,11,0.1)"}});
-        var actIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-start":"▶","timer-stop":"■","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝"};
-        var actColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-start":"#60a5fa","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888"};
+        var actIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-start":"▶","timer-stop":"■","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝","chat-send":"💬"};
+        var actColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-start":"#60a5fa","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888","chat-send":"#22d3ee"};
         todayActs.forEach(function(a){
           var t=new Date(a.ts);var time=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
           var row=h("div",{class:"f ac g6",style:{padding:"3px 0",fontSize:"11px"}});
@@ -1562,9 +1606,12 @@ function rHome(){
   }else if(hTab==="jobs"){
     var jList=h("div",{class:"fc g10"});
     // Filter chips
-    var jfRow=h("div",{class:"f g4 fw",style:{marginBottom:"4px"}});
+    var jfRow=h("div",{class:"f ac g4 fw",style:{marginBottom:"4px"}});
     var jfOpts=[{key:"active",label:"Active",color:"#f59e0b"},{key:"all",label:"All",color:"#888"},{key:"delivered",label:"Delivered",color:"#555"}];
     jfOpts.forEach(function(o){var isOn=ui.jobFilter===o.key;var b=h("button",{class:"chip"+(isOn?" on":""),style:{color:isOn?o.color:"#555",borderColor:isOn?o.color:"#333",fontSize:"10px"},onClick:function(){ui.jobFilter=o.key;R()}},o.label);jfRow.append(b)});
+    var intakeUrl=window.location.href.replace(/\/[^\/]*$/,"/")+("intake.html");
+    var shareIntake=h("button",{class:"chip",style:{color:"#22c55e",borderColor:"rgba(34,197,94,0.3)",fontSize:"10px",marginLeft:"auto"},onClick:function(){navigator.clipboard.writeText(intakeUrl).then(function(){flash("Intake link copied!")}).catch(function(){prompt("Copy this link:",intakeUrl)})}});shareIntake.innerHTML="📋 Intake Link";
+    jfRow.append(shareIntake);
     jList.append(jfRow);
     // Incoming requests
     if(_intakeItems.length>0){
