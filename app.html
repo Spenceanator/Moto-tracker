@@ -172,6 +172,15 @@ function migrate(d){
   // Migrate customers from existing jobs
   if(!d.customers)d.customers=[];
   if(!d.activity)d.activity=[];
+  // Migrate workLog/notes strings to log entries
+  if(d.bikes)d.bikes.forEach(function(b){
+    if(!b.log)b.log=[];
+    if(b.workLog&&b.log.length===0){b.log.push({id:mid(),ts:b.createdAt||Date.now(),text:b.workLog});b.workLog=""}
+  });
+  if(d.jobs)d.jobs.forEach(function(j){
+    if(!j.log)j.log=[];
+    if(j.notes&&j.log.length===0){j.log.push({id:mid(),ts:j.createdAt||Date.now(),text:j.notes});j.notes=""}
+  });
   if(d.customers.length===0&&d.jobs.length>0){
     var seen={};d.jobs.forEach(function(j){
       if(!j.customer)return;var key=j.customer.toLowerCase().trim();
@@ -415,7 +424,7 @@ timer:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="curre
 function chev(o){return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate('+(o?90:0)+'deg);transition:transform .15s"><path d="M5 3l4 4-4 4"/></svg>'}
 
 var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";
-var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]};
+var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[],logEdit:null};
 var st=null;
 function ss(){if(st)clearTimeout(st);st=setTimeout(save,200)}
 function nav(v,id){cv=v;selBike=v==="bike"?id:null;selLead=v==="lead"?id:null;selJob=v==="job"?id:null;selClient=v==="client"?id:null;ui=Object.assign({},ui,{addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,tExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,sellFlow:0,sellPrice:"",sellDate:"",scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]});R()}
@@ -449,6 +458,48 @@ function rBackup(){
 }
 
 // ============ TASKS ============
+// ============ LOG ============
+function rLog(entity,entityType,entityId){
+  if(!entity.log)entity.log=[];
+  var w=h("div",{class:"fc g10"});
+  // Add entry
+  var addW=h("div",{class:"fc g6"});
+  var ta=h("textarea",{rows:"3",placeholder:"What happened? What did you find? What's next?",style:{fontSize:"13px"}});
+  var addBtn=h("button",{class:"bp",style:{alignSelf:"flex-start",padding:"8px 16px",fontSize:"12px"},onClick:function(){
+    if(!ta.value.trim())return;
+    entity.log.push({id:mid(),ts:Date.now(),text:ta.value.trim()});
+    logAct("note-add",ta.value.trim().slice(0,60),entityType,entityId);
+    ta.value="";save();R()}});addBtn.innerHTML=I.plus+" Add Entry";
+  addW.append(ta,addBtn);w.append(addW);
+  // Entries newest first
+  var sorted=entity.log.slice().sort(function(a,b){return b.ts-a.ts});
+  if(sorted.length===0){w.append(h("p",{style:{color:"#444",fontSize:"12px",textAlign:"center",padding:"16px"}},"No entries yet. Start documenting."));return w}
+  var timeline=h("div",{class:"fc",style:{borderLeft:"2px solid #222",marginLeft:"6px",paddingLeft:"12px"}});
+  sorted.forEach(function(entry){
+    var d=new Date(entry.ts);
+    var dateStr=d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+    var timeStr=("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+    var isEditing=ui.logEdit===entry.id;
+    var card=h("div",{class:"fc g4",style:{position:"relative",padding:"10px 0",borderBottom:"1px solid #1a1a1a"}});
+    // Dot on timeline
+    card.append(h("div",{style:{position:"absolute",left:"-17px",top:"14px",width:"8px",height:"8px",borderRadius:"50%",background:"#333"}}));
+    var hdr=h("div",{class:"f ac jb"});
+    hdr.append(h("span",{style:{color:"#555",fontSize:"10px",fontVariantNumeric:"tabular-nums"}},dateStr+" "+timeStr));
+    var btns=h("div",{class:"f g4"});
+    btns.append(h("button",{class:"ib",style:{fontSize:"10px",padding:"2px"},onClick:function(){ui.logEdit=isEditing?null:entry.id;R()}},isEditing?"cancel":"edit"));
+    btns.append(h("button",{class:"ib",style:{color:"#ef444460",fontSize:"10px",padding:"2px"},onClick:function(){entity.log=entity.log.filter(function(e){return e.id!==entry.id});save();R()}},"×"));
+    hdr.append(btns);card.append(hdr);
+    if(isEditing){
+      var editTa=h("textarea",{rows:"4",style:{fontSize:"12px",lineHeight:"1.5"},onInput:function(e){entry.text=e.target.value}});editTa.value=entry.text;
+      card.append(editTa,h("button",{class:"bs",style:{alignSelf:"flex-start",fontSize:"10px",marginTop:"4px"},onClick:function(){ui.logEdit=null;save();R()}},"Save"));
+    }else{
+      card.append(h("p",{style:{color:"#ccc",fontSize:"12px",lineHeight:"1.5",whiteSpace:"pre-wrap"}},entry.text));
+    }
+    timeline.append(card)});
+  w.append(timeline);
+  return w;
+}
+
 function rTask(task,bike){
   var unv=!task.verified;
   var c=task.done?"#22c55e":task.blocked?"#ef4444":unv?"#a855f7":"#f59e0b";
@@ -714,7 +765,7 @@ function rBikeView(){
     if(done.length>0){var sec3=h("div",{class:"fc g6"});var tog=h("button",{class:"f ac g6",style:{color:"#22c55e",fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",padding:0},onClick:function(){ui.showDone=!ui.showDone;R()}});var ch_=document.createElement("span");ch_.innerHTML=chev(ui.showDone);ch_.style.display="flex";tog.append(ch_," Done ("+done.length+")");sec3.append(tog);if(ui.showDone)done.forEach(function(t){sec3.append(rTask(t,bike))});c.append(sec3)}
     if(!ready.length&&!blocked.length&&!done.length&&!unverified.length)c.append(h("p",{style:{color:"#555",fontSize:"13px",textAlign:"center",padding:"20px"}},"No tasks yet."));root.append(c);
   }else if(ui.bTab==="specs"){root.append(rSpecs(bike,true));
-  }else if(ui.bTab==="notes"){var w=h("div",{class:"fc g12"});w.append(h("p",{style:{color:"#777",fontSize:"12px"}},"Working notes"));var ta=h("textarea",{rows:"14",placeholder:"e.g.\n3/1 - Carbs need cleaning",onInput:function(e){bike.workLog=e.target.value;ss()}});ta.value=bike.workLog||"";w.append(ta,h("span",{style:{color:"#555",fontSize:"11px"}},"Auto-saves"));root.append(w);
+  }else if(ui.bTab==="notes"){root.append(rLog(bike,"bike",bike.id));
   }else if(ui.bTab.startsWith("cl_"))root.append(rChecklist(bike,ui.bTab.replace("cl_","")));
   if(!ui.sellFlow){root.append(h("button",{style:{background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"6px",color:"#22c55e",padding:"12px",fontSize:"13px",fontWeight:700,width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",marginTop:"12px"},onClick:function(){ui.sellFlow=1;ui.sellDate=today();R()}},ic("sold")," Mark as Sold"))
   }else{var sf=h("div",{class:"ep fc g12",style:{borderColor:"rgba(34,197,94,0.3)"}});sf.append(h("span",{class:"lbl",style:{color:"#22c55e"}},"Complete Sale"));var sp=h("input",{type:"text",value:ui.sellPrice,placeholder:"Final sell price",style:{borderColor:"rgba(34,197,94,0.3)"},onInput:function(e){ui.sellPrice=e.target.value}});var sd=h("input",{type:"date",value:ui.sellDate,onInput:function(e){ui.sellDate=e.target.value}});sf.append(sp,sd);
@@ -1107,12 +1158,15 @@ function rJobView(){
     if(done.length>0){var sec3=h("div",{class:"fc g6"});var tog=h("button",{class:"f ac g6",style:{color:"#22c55e",fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",padding:0},onClick:function(){ui.showDone=!ui.showDone;R()}});var ch_=document.createElement("span");ch_.innerHTML=chev(ui.showDone);ch_.style.display="flex";tog.append(ch_," Done ("+done.length+")");sec3.append(tog);if(ui.showDone)done.forEach(function(t){sec3.append(rTask(t,job))});c.append(sec3)}
     if(!ready.length&&!blocked.length&&!done.length)c.append(h("p",{style:{color:"#555",fontSize:"13px",textAlign:"center",padding:"20px"}},"No tasks yet."));
     root.append(c);
-  }else if(ui.bTab==="notes"){var w=h("div",{class:"fc g12"});w.append(h("p",{style:{color:"#777",fontSize:"12px"}},"Working notes (private)"));var ta=h("textarea",{rows:"10",placeholder:"Parts needed, observations, follow-up...",onInput:function(e){job.notes=e.target.value;ss()}});ta.value=job.notes||"";w.append(ta);
-    w.append(h("p",{style:{color:"#22d3ee",fontSize:"12px",marginTop:"8px"}},"Customer-visible notes"));
-    w.append(h("p",{style:{color:"#555",fontSize:"11px"}},"Shown on the shared status page when you share a job link."));
+  }else if(ui.bTab==="notes"){var w=h("div",{class:"fc g12"});
+    w.append(h("span",{class:"lbl"},"Work Log"));
+    w.append(rLog(job,"job",job.id));
+    w.append(h("div",{style:{borderTop:"1px solid #222",paddingTop:"12px",marginTop:"8px"}}));
+    w.append(h("span",{class:"lbl",style:{color:"#22d3ee"}},"Customer-visible notes"));
+    w.append(h("p",{style:{color:"#555",fontSize:"11px"}},"Shown on the shared status page."));
     var pubTa=h("textarea",{rows:"6",placeholder:"Update for the customer...",style:{borderColor:"rgba(34,211,238,0.2)"},onInput:function(e){job.publicNotes=e.target.value;ss()}});pubTa.value=job.publicNotes||"";w.append(pubTa);
     if(job.shareToken)w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#22d3ee",borderColor:"rgba(34,211,238,0.3)",fontSize:"11px"},onClick:function(){pushJobPublic(job);flash("Status page updated")}},"Push update now"));
-    w.append(h("span",{style:{color:"#555",fontSize:"11px"}},"Auto-saves"));root.append(w)}
+    root.append(w)}
 
   // Timestamps
   var ts=h("div",{class:"f g12 fw",style:{fontSize:"10px",color:"#555",padding:"8px 0"}});
@@ -1305,8 +1359,8 @@ function rHome(){
       var todayActs=(data.activity||[]).filter(function(a){return new Date(a.ts).toISOString().split("T")[0]===todayStr}).sort(function(a,b){return b.ts-a.ts});
       if(todayActs.length>0){
         var feedW=h("div",{class:"fc g2",style:{marginTop:"6px",maxHeight:"160px",overflowY:"auto",padding:"8px 10px",background:"rgba(245,158,11,0.04)",borderRadius:"8px",border:"1px solid rgba(245,158,11,0.1)"}});
-        var actIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-start":"▶","timer-stop":"■","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰"};
-        var actColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-start":"#60a5fa","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e"};
+        var actIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-start":"▶","timer-stop":"■","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝"};
+        var actColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-start":"#60a5fa","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888"};
         todayActs.forEach(function(a){
           var t=new Date(a.ts);var time=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
           var row=h("div",{class:"f ac g6",style:{padding:"3px 0",fontSize:"11px"}});
