@@ -317,10 +317,12 @@ function Workspace() {
   const decomposeRef = useRef(null);
 
   // Load
+  const skipPushRef = useRef(false);
   useEffect(() => {
     wsSyncPull(function(remote) {
       var data = remote || loadJSON(STORE, null);
       if (data && data.nodes) {
+        skipPushRef.current = true;
         setNodes(data.nodes.map((n) => ({ ...n, sessions: n.sessions || [], tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
         setConnections(data.connections || []);
         if (data.focusSessions) setFocusSessions(data.focusSessions);
@@ -330,6 +332,7 @@ function Workspace() {
       const keys = loadJSON(KEYS_STORE, null);
       if (keys) setKeyBindings({ ...DEFAULT_KEYS, ...keys });
       setLoaded(true);
+      setTimeout(() => { skipPushRef.current = false; }, 600);
       wsStartPoll();
       // Show intention prompt if no intention set today
       const today = new Date().toISOString().split("T")[0];
@@ -343,18 +346,21 @@ function Workspace() {
   useEffect(() => {
     window._wsApplyRemote = (remote) => {
       if (remote && remote.nodes) {
+        skipPushRef.current = true;
         setNodes(remote.nodes.map((n) => ({ ...n, sessions: n.sessions || [], tasks: (n.tasks || []).map((t) => ({ blockReason: "", completedAt: null, ...t })) })));
         setConnections(remote.connections || []);
         if (remote.focusSessions) setFocusSessions(remote.focusSessions);
         if (remote.intention) { setDailyIntention(remote.intention.text || ""); setIntentionDate(remote.intention.date || ""); }
         saveJSON(STORE, remote);
+        _wsLastPush = Date.now();
+        setTimeout(() => { skipPushRef.current = false; }, 600);
       }
     };
     return () => { window._wsApplyRemote = null; };
   }, []);
 
   // Save (local + cloud)
-  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, focusSessions, intention: { text: dailyIntention, date: intentionDate }, _ts: Date.now() }; saveJSON(STORE, payload); wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, focusSessions, dailyIntention, intentionDate, loaded]);
+  useEffect(() => { if (loaded) { const t = setTimeout(() => { const payload = { nodes, connections, focusSessions, intention: { text: dailyIntention, date: intentionDate }, _ts: Date.now() }; saveJSON(STORE, payload); if (!skipPushRef.current) wsSyncPush(payload); }, 400); return () => clearTimeout(t); } }, [nodes, connections, focusSessions, dailyIntention, intentionDate, loaded]);
   useEffect(() => { if (loaded) { const t = setTimeout(() => saveJSON(KEYS_STORE, keyBindings), 300); return () => clearTimeout(t); } }, [keyBindings, loaded]);
 
   const visibleNodes = nodes.filter((n) => n.parentId === viewParentId);
