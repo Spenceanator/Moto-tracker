@@ -46,14 +46,12 @@ function refreshAuth(){
   }catch(e){return Promise.resolve(null)}
 }
 function sbHeaders(){var a=getAuth();return{"apikey":SB_KEY,"Authorization":"Bearer "+(a?a.access_token:SB_KEY),"Content-Type":"application/json"}}
-(function(){var s=getAuth();if(s)return;try{var raw=JSON.parse(localStorage.getItem(AUTH_SK));if(raw&&raw.refresh_token){refreshAuth().then(function(r){if(!r)window.location.href="index.html"});return}}catch(e){}window.location.href="index.html"})();
+(function(){var s=getAuth();if(s){pullNotebooks(function(){renderNav()});return}try{var raw=JSON.parse(localStorage.getItem(AUTH_SK));if(raw&&raw.refresh_token){refreshAuth().then(function(r){if(!r){window.location.href="index.html"}else{pullNotebooks(function(){renderNav()})}});return}}catch(e){}window.location.href="index.html"})();
 setInterval(function(){refreshAuth()},45*60*1000);
-
-// ============ NOTEBOOKS ============
 function loadNotebooks(){try{var v=localStorage.getItem(NB_LIST_KEY);return v?JSON.parse(v):[{id:"default",name:"Personal",color:"#64748b"}]}catch(e){return[{id:"default",name:"Personal",color:"#64748b"}]}}
 function saveNotebooks(nbs){
   try{localStorage.setItem(NB_LIST_KEY,JSON.stringify(nbs))}catch(e){}
-  // Sync notebook list to cloud
+  // Sync notebook list + active ID to cloud
   if(getAuth()){
     var url=SB_URL+"/rest/v1/notebooks?id=eq.ws-notebooks";
     var body=JSON.stringify({id:"ws-notebooks",data:{notebooks:nbs},updated_at:new Date().toISOString()});
@@ -69,14 +67,12 @@ function pullNotebooks(cb){
   if(!getAuth()){if(cb)cb();return}
   fetch(SB_URL+"/rest/v1/notebooks?id=eq.ws-notebooks&select=data",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
-    if(rows.length>0&&rows[0].data&&rows[0].data.notebooks){
-      localStorage.setItem(NB_LIST_KEY,JSON.stringify(rows[0].data.notebooks));
+    if(rows.length>0&&rows[0].data){
+      if(rows[0].data.notebooks)localStorage.setItem(NB_LIST_KEY,JSON.stringify(rows[0].data.notebooks));
     }
     if(cb)cb();
   }).catch(function(){if(cb)cb()});
 }
-// Pull notebooks on load then render nav
-pullNotebooks(function(){renderNav()});
 function getActiveNbId(){return localStorage.getItem(NB_ACTIVE_KEY)||"default"}
 function setActiveNbId(id){localStorage.setItem(NB_ACTIVE_KEY,id)}
 function getSyncId(){return"ws-nb-"+getActiveNbId()}
