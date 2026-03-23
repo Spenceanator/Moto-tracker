@@ -235,15 +235,20 @@ function loadChat(){
 }
 
 load();
-// Auto-refresh every 60s
+// Auto-refresh job data every 60s — preserve chat draft
 setInterval(function(){
   var token=getToken();if(!token)return;
+  // Save chat draft before refresh
+  var chatTa=document.querySelector(".chat-input textarea");
+  var draft=chatTa?chatTa.value:"";
   fetch(SB_URL+"/rest/v1/job_public?token=eq."+token,{
     method:"GET",headers:{"apikey":SB_KEY,"Content-Type":"application/json"}
   }).then(function(r){return r.json()}).then(function(rows){
     if(rows&&rows.length>0){
       document.getElementById("root").innerHTML='<div class="logo"><h1>DRYDOCK</h1><p>Job Status</p></div>';
       render(rows[0]);
+      // Restore chat draft
+      if(draft){var newTa=document.querySelector(".chat-input textarea");if(newTa)newTa.value=draft}
     }
   }).catch(function(){});
 },60000);

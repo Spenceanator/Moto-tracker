@@ -117,10 +117,26 @@ function renderNav(){
     el.style.cssText="color:"+(isCur?"#f59e0b":"#666")+";font-size:13px;text-decoration:none;padding:8px 12px;border-radius:6px;font-family:var(--font);transition:color .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent";
     nav.appendChild(el);
   });
-  if(a){var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
+  if(a){
+    // Notification bell
+    var bellWrap=document.createElement("div");bellWrap.style.cssText="position:relative;margin-left:auto";bellWrap.id="notif-bell";
+    var bellBtn=document.createElement("button");bellBtn.style.cssText="color:#555;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 10px;font-family:var(--font);-webkit-tap-highlight-color:transparent;position:relative";
+    bellBtn.textContent="🔔";bellBtn.onclick=function(e){e.stopPropagation();toggleNotifMenu()};
+    var bellCount=document.createElement("span");bellCount.className="nb-count";
+    var total=getUnreadTotal()+_intakeItems.length;
+    bellCount.style.cssText="position:absolute;top:2px;right:2px;background:#f59e0b;color:#000;font-size:8px;font-weight:800;min-width:14px;height:14px;border-radius:7px;display:"+(total>0?"flex":"none")+";align-items:center;justify-content:center;padding:0 3px";
+    bellCount.textContent=total>0?total:"";
+    bellBtn.appendChild(bellCount);bellWrap.appendChild(bellBtn);
+    // Dropdown menu
+    var bellMenu=document.createElement("div");bellMenu.id="notif-menu";
+    bellMenu.style.cssText="display:none;position:absolute;top:38px;right:0;width:280px;max-height:320px;overflow-y:auto;background:#111113;border:1px solid #252528;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.6);z-index:999;flex-direction:column;font-family:var(--font)";
+    bellWrap.appendChild(bellMenu);nav.appendChild(bellWrap);
+    // Close on outside click
+    document.addEventListener("click",function(e){if(_notifOpen&&!bellWrap.contains(e.target)){_notifOpen=false;bellMenu.style.display="none"}});
+    var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.3.2";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.4.0";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -247,24 +263,32 @@ function requestNotifPermission(){
     Notification.requestPermission();
   }
 }
-function sendNotif(title,body){
+function sendNotif(title,body,jobId){
   if("Notification" in window && Notification.permission==="granted"){
-    try{new Notification(title,{body:body,icon:"",tag:"drydock-"+Date.now()})}catch(e){}
+    try{
+      var n=new Notification(title,{body:body,tag:"drydock-"+(jobId||Date.now()),data:{jobId:jobId||""}});
+      n.onclick=function(){window.focus();if(jobId){nav("job",jobId);setTimeout(function(){ui.bTab="chat";R()},50)}};
+    }catch(e){}
   }
 }
 function pingSound(){
   try{var ctx=new(window.AudioContext||window.webkitAudioContext)();var osc=ctx.createOscillator();var gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=880;osc.type="sine";gain.gain.value=0.08;osc.start();gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);osc.stop(ctx.currentTime+0.3)}catch(e){}
 }
 
+var _notifItems=[];
+function addNotifItem(type,text,jobId){
+  _notifItems.unshift({type:type,text:text,jobId:jobId||"",ts:Date.now()});
+  if(_notifItems.length>20)_notifItems=_notifItems.slice(0,20);
+}
+
 function pollAllChats(){
   var tokens=data.jobs.filter(function(j){return j.shareToken&&j.status!=="delivered"}).map(function(j){return j.shareToken});
   if(tokens.length===0)return;
-  // Fetch recent customer messages for all active shared jobs
   var tokenFilter=tokens.map(function(t){return"token.eq."+t}).join(",");
   fetch(SB_URL+"/rest/v1/job_chat?or=("+tokenFilter+")&sender=eq.customer&order=created_at.desc&limit=50",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(msgs){
     if(!msgs)return;
-    var newUnread=0;var prevTotal=Object.keys(_chatCounts).reduce(function(s,k){return s+(_chatCounts[k]||0)},0);
+    var prevCounts=JSON.parse(JSON.stringify(_chatCounts));
     _chatCounts={};
     msgs.forEach(function(m){
       var lastRead=_chatRead[m.token]||0;
@@ -274,22 +298,79 @@ function pollAllChats(){
         _chatCounts[m.token]++;
       }
     });
+    // Notify per job that has NEW unread (not already notified)
     var totalUnread=Object.keys(_chatCounts).reduce(function(s,k){return s+_chatCounts[k]},0);
-    if(totalUnread>prevTotal&&totalUnread>0&&Date.now()-_lastNotifTs>30000){
-      _lastNotifTs=Date.now();
-      var job=data.jobs.find(function(j){return j.shareToken&&_chatCounts[j.shareToken]>0});
-      var custName=job?job.customer:"Customer";
-      sendNotif("Drydock Message",custName+" sent a message");
-      pingSound();
+    if(Date.now()-_lastNotifTs>15000){
+      Object.keys(_chatCounts).forEach(function(token){
+        var prev=prevCounts[token]||0;
+        if(_chatCounts[token]>prev){
+          var job=data.jobs.find(function(j){return j.shareToken===token});
+          if(job){
+            var vt=[job.vehicleYear,job.vehicleMake,job.vehicleModel].filter(Boolean).join(" ")||"Job";
+            var label=(job.customer?job.customer+" — ":"")+vt;
+            sendNotif("💬 "+label,(job.customer||"Customer")+" sent a message",job.id);
+            addNotifItem("chat",label,job.id);
+            _lastNotifTs=Date.now();
+          }
+        }
+      });
+      if(totalUnread>0&&Object.keys(_chatCounts).some(function(k){return(_chatCounts[k]||0)>(prevCounts[k]||0)}))pingSound();
     }
-    // Update nav badge
     updateUnreadBadge(totalUnread);
+    renderNotifBell();
   }).catch(function(){});
 }
 function getUnreadTotal(){return Object.keys(_chatCounts).reduce(function(s,k){return s+(_chatCounts[k]||0)},0)}
 function updateUnreadBadge(count){
   var el=document.getElementById("chat-badge");
   if(el){el.textContent=count>0?count:"";el.style.display=count>0?"inline-block":"none"}
+}
+var _notifOpen=false;
+function renderNotifBell(){
+  var total=getUnreadTotal()+_intakeItems.length;
+  var el=document.getElementById("notif-bell");
+  if(!el)return;
+  var badge=el.querySelector(".nb-count");
+  if(badge){badge.textContent=total>0?total:"";badge.style.display=total>0?"flex":"none"}
+}
+function toggleNotifMenu(){
+  _notifOpen=!_notifOpen;
+  var menu=document.getElementById("notif-menu");
+  if(!menu)return;
+  if(!_notifOpen){menu.style.display="none";return}
+  menu.style.display="flex";menu.innerHTML="";
+  // Unread chats
+  var unreadJobs=data.jobs.filter(function(j){return j.shareToken&&_chatCounts[j.shareToken]>0});
+  if(unreadJobs.length>0){
+    var hdr=document.createElement("div");hdr.style.cssText="color:#f59e0b;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:8px 12px 4px";hdr.textContent="Messages";menu.appendChild(hdr);
+    unreadJobs.forEach(function(j){
+      var vt=[j.vehicleYear,j.vehicleMake,j.vehicleModel].filter(Boolean).join(" ")||"Job";
+      var label=(j.customer?j.customer+" — ":"")+vt;
+      var count=_chatCounts[j.shareToken]||0;
+      var row=document.createElement("button");row.style.cssText="display:flex;align-items:center;gap:8px;padding:8px 12px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid #1a1a1a;cursor:pointer;font-family:var(--font)";
+      row.onmouseenter=function(){row.style.background="#1a1a1c"};row.onmouseleave=function(){row.style.background="none"};
+      var txt=document.createElement("span");txt.style.cssText="flex:1;color:#e5e5e5;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";txt.textContent=label;
+      var badge=document.createElement("span");badge.style.cssText="background:#f59e0b;color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px";badge.textContent=count;
+      row.appendChild(txt);row.appendChild(badge);
+      row.onclick=function(){_notifOpen=false;menu.style.display="none";nav("job",j.id);setTimeout(function(){ui.bTab="chat";R()},50)};
+      menu.appendChild(row);
+    });
+  }
+  // Intake requests
+  if(_intakeItems.length>0){
+    var hdr2=document.createElement("div");hdr2.style.cssText="color:#22c55e;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:8px 12px 4px";hdr2.textContent="Requests";menu.appendChild(hdr2);
+    _intakeItems.forEach(function(item){
+      var row=document.createElement("button");row.style.cssText="display:flex;align-items:center;gap:8px;padding:8px 12px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid #1a1a1a;cursor:pointer;font-family:var(--font)";
+      row.onmouseenter=function(){row.style.background="#1a1a1c"};row.onmouseleave=function(){row.style.background="none"};
+      var txt=document.createElement("span");txt.style.cssText="flex:1;color:#e5e5e5;font-size:12px";txt.textContent=(item.customer_name||"Unknown")+" — "+[item.vehicle_year,item.vehicle_make,item.vehicle_model].filter(Boolean).join(" ");
+      row.appendChild(txt);
+      row.onclick=function(){_notifOpen=false;menu.style.display="none";hTab="jobs";cv="home";R()};
+      menu.appendChild(row);
+    });
+  }
+  if(unreadJobs.length===0&&_intakeItems.length===0){
+    var empty=document.createElement("div");empty.style.cssText="color:#444;font-size:11px;text-align:center;padding:16px";empty.textContent="No notifications";menu.appendChild(empty);
+  }
 }
 // Request notification permission on first interaction
 document.addEventListener("click",function(){requestNotifPermission()},{once:true});
@@ -359,7 +440,11 @@ function fetchIntake(cb,force){
   .then(function(r){return r.json()}).then(function(rows){
     var prev=_intakeItems.length;_intakeItems=rows||[];
     if(_intakeItems.length>prev&&prev>=0){
-      sendNotif("Drydock Request",(_intakeItems[0].customer_name||"Someone")+" submitted a service request");
+      var iName=(_intakeItems[0].customer_name||"Someone");
+      var iVeh=[_intakeItems[0].vehicle_year,_intakeItems[0].vehicle_make,_intakeItems[0].vehicle_model].filter(Boolean).join(" ");
+      sendNotif("🔧 New Request",iName+(iVeh?" — "+iVeh:"")+" needs service");
+      addNotifItem("intake",iName+(iVeh?" — "+iVeh:""),"");
+      renderNotifBell();
       pingSound();
     }
     if(force||_intakeItems.length!==prev){if(cb)cb()}
