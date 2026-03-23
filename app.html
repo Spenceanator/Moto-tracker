@@ -119,25 +119,10 @@ function renderNav(){
     nav.appendChild(el);
   });
   if(a){
-    // Notification bell
-    var bellWrap=document.createElement("div");bellWrap.style.cssText="position:relative;margin-left:auto";bellWrap.id="notif-bell";
-    var bellBtn=document.createElement("button");bellBtn.style.cssText="color:#555;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 10px;font-family:var(--font);-webkit-tap-highlight-color:transparent;position:relative";
-    bellBtn.textContent="🔔";bellBtn.onclick=function(e){e.stopPropagation();toggleNotifMenu()};
-    var bellCount=document.createElement("span");bellCount.className="nb-count";
-    var total=getUnreadTotal()+_intakeItems.length;
-    bellCount.style.cssText="position:absolute;top:2px;right:2px;background:#f59e0b;color:#000;font-size:8px;font-weight:800;min-width:14px;height:14px;border-radius:7px;display:"+(total>0?"flex":"none")+";align-items:center;justify-content:center;padding:0 3px";
-    bellCount.textContent=total>0?total:"";
-    bellBtn.appendChild(bellCount);bellWrap.appendChild(bellBtn);
-    // Dropdown menu
-    var bellMenu=document.createElement("div");bellMenu.id="notif-menu";
-    bellMenu.style.cssText="display:none;position:absolute;top:38px;right:0;width:280px;max-height:320px;overflow-y:auto;background:#111113;border:1px solid #252528;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.6);z-index:999;flex-direction:column;font-family:var(--font)";
-    bellWrap.appendChild(bellMenu);nav.appendChild(bellWrap);
-    // Close on outside click
-    document.addEventListener("click",function(e){if(_notifOpen&&!bellWrap.contains(e.target)){_notifOpen=false;bellMenu.style.display="none"}});
-    var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
+    var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.9.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.9.1";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -1639,7 +1624,21 @@ function rHome(){
   var root=h("div",{class:"fc g10"});var hdr=h("div",{class:"f ac jb",style:{marginBottom:"12px"}});
   var ajCount=data.jobs.filter(function(j){return j.status!=="delivered"}).length;
   hdr.append(h("div",null,h("h1",{style:{fontSize:"22px",fontWeight:800,color:"#f59e0b",letterSpacing:"-0.5px"}},"DRYDOCK"),h("p",{style:{marginTop:"4px",color:"#555",fontSize:"12px"}},data.bikes.length+"/2 slots \u00b7 "+data.leads.length+" leads"+(ajCount?" \u00b7 "+ajCount+" jobs":"")+" \u00b7 v"+APP_VERSION)));
-  var gb=h("button",{class:"ibs",onClick:function(){nav("settings")}});gb.innerHTML=I.gear;hdr.append(gb);root.append(hdr);
+  var total=getUnreadTotal()+_intakeItems.length;
+  var btnRow=h("div",{class:"f ac g4"});
+  var bellWrap=h("div",{style:{position:"relative"}});bellWrap.id="notif-bell";
+  var bellBtn=h("button",{class:"ibs",style:{position:"relative",fontSize:"16px"},onClick:function(e){e.stopPropagation();toggleNotifMenu()}});bellBtn.textContent="🔔";
+  if(total>0){bellBtn.style.animation="bellShake 0.8s ease-in-out infinite";bellBtn.style.color="#f59e0b"}
+  var bellCount=document.createElement("span");bellCount.className="nb-count";
+  bellCount.style.cssText="position:absolute;top:0;right:0;background:#f59e0b;color:#000;font-size:8px;font-weight:800;min-width:14px;height:14px;border-radius:7px;display:"+(total>0?"flex":"none")+";align-items:center;justify-content:center;padding:0 3px";
+  bellCount.textContent=total>0?total:"";
+  bellBtn.appendChild(bellCount);bellWrap.appendChild(bellBtn);
+  var bellMenu=h("div",{id:"notif-menu",style:{display:"none",position:"absolute",top:"38px",right:0,width:"280px",maxHeight:"320px",overflowY:"auto",background:"#111113",border:"1px solid #252528",borderRadius:"10px",boxShadow:"0 8px 32px rgba(0,0,0,0.6)",zIndex:999,flexDirection:"column"}});
+  bellWrap.appendChild(bellMenu);
+  document.addEventListener("click",function(e){if(_notifOpen&&!bellWrap.contains(e.target)){_notifOpen=false;bellMenu.style.display="none"}});
+  btnRow.append(bellWrap);
+  var gb=h("button",{class:"ibs",onClick:function(){nav("settings")}});gb.innerHTML=I.gear;btnRow.append(gb);
+  hdr.append(btnRow);root.append(hdr);
   root.append(rBackup());
   var nvb=h("div",{class:"nb"});
   var activeJobs=data.jobs.filter(function(j){return j.status!=="delivered"}).length;
