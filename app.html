@@ -137,7 +137,7 @@ function renderNav(){
     var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.7.3";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.8.0";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -830,7 +830,7 @@ function rTask(task,bike){
   if(isActive){var ew=h("div",{class:"fc g6",style:{marginTop:"6px",marginLeft:"32px",width:"calc(100% - 32px)",paddingTop:"6px",borderTop:"1px solid #1a1a1a"}});
     if(task.blocked&&!task.done)ew.append(h("input",{type:"text",value:task.blockedReason||"",placeholder:"Why blocked?",style:{background:"rgba(239,68,68,0.08)",borderColor:"rgba(239,68,68,0.2)",color:"#ef4444",padding:"5px 8px",fontSize:"12px"},onInput:function(e){task.blockedReason=e.target.value;ss()}}));
     var costRow=h("div",{class:"f ac g8"});costRow.append(h("input",{type:"text",value:task.cost||"",placeholder:"$ cost",style:{width:"100px",background:"rgba(245,158,11,0.08)",borderColor:"rgba(245,158,11,0.2)",color:"#f59e0b",padding:"5px 8px",fontSize:"12px"},onInput:function(e){task.cost=e.target.value.replace(/[^0-9.]/g,"");ss()}}));
-    if(task.cost)costRow.append(h("button",{style:{padding:"4px 8px",borderRadius:"4px",fontSize:"10px",fontWeight:600,border:task.costLogged?"1px solid #22c55e":"1px solid #555",background:task.costLogged?"rgba(34,197,94,0.1)":"transparent",color:task.costLogged?"#22c55e":"#777",cursor:"pointer"},onClick:function(e){e.stopPropagation();task.costLogged=!task.costLogged;ss();R()}},task.costLogged?"In expenses ✓":"Not in expenses"));
+    if(task.cost)costRow.append(h("button",{style:{padding:"4px 8px",borderRadius:"4px",fontSize:"10px",fontWeight:600,border:task.costLogged?"1px solid #22c55e":"1px solid #555",background:task.costLogged?"rgba(34,197,94,0.1)":"transparent",color:task.costLogged?"#22c55e":"#777",cursor:"pointer"},onClick:function(e){e.stopPropagation();task.costLogged=!task.costLogged;ss();R()}},task.costLogged?"In Expenses tab ✓":"Counts in P&L"));
     ew.append(costRow);
     var ta=h("textarea",{rows:"3",placeholder:"Task notes...",style:{background:"rgba(255,255,255,0.03)",fontSize:"12px",padding:"6px 8px",lineHeight:1.4},onInput:function(e){task.note=e.target.value;ss()}});ta.value=task.note||"";ew.append(ta);
     ew.append(h("button",{style:{alignSelf:"flex-start",padding:"4px 10px",borderRadius:"4px",fontSize:"10px",fontWeight:600,border:"1px solid rgba(239,68,68,0.2)",color:"#ef444460",cursor:"pointer",marginTop:"2px"},onClick:function(e){e.stopPropagation();bike.tasks=bike.tasks.filter(function(t){return t.id!==task.id});ss();R()}},"Delete task"));
@@ -1029,9 +1029,10 @@ function rBikeView(){
   var root=h("div",{class:"fc g16"});var unverified=bike.tasks.filter(function(t){return!t.done&&!t.blocked&&!t.verified}),ready=bike.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}),blocked=bike.tasks.filter(function(t){return!t.done&&t.blocked}),done=bike.tasks.filter(function(t){return t.done});
   var waitingParts=(bike.parts||[]).filter(function(p){return p.status==="ordered"||p.status==="shipped"}).length;
   var tmpls=bike.checklistTemplates||[];var tabs=[{key:"tasks",label:"Tasks",count:ready.length},{key:"parts",label:"Parts"+(waitingParts?" ("+waitingParts+")":"")},{key:"info",label:"Info"},{key:"log",label:"Log"}].concat(tmpls.map(function(t){return{key:"cl_"+t.id,label:t.name}}));
-  var partsCost=bike.tasks.reduce(function(s,t){return s+(parseFloat(t.cost)||0)},0);
+  var taskCost=bike.tasks.reduce(function(s,t){return t.costLogged?s:s+(parseFloat(t.cost)||0)},0);
+  var partsTrackerCost=(bike.parts||[]).reduce(function(s,p){return s+(parseFloat(p.cost)||0)},0);
   var expCost=data.expenses.filter(function(e){return e.bikeId===bike.id}).reduce(function(s,e){return s+(parseFloat(e.amount)||0)},0);
-  var totalIn=partsCost+expCost;
+  var totalIn=taskCost+partsTrackerCost+expCost;
   var buyNum=$(bike.actualBuyPrice||bike.buyPrice);var sellNum=$(bike.targetSell);
   var allIn=buyNum+totalIn;
   var margin=sellNum>0?$$(sellNum-allIn):null;
@@ -1049,12 +1050,13 @@ function rBikeView(){
   var stats=h("div",{class:"f g12",style:{padding:"10px 0",borderTop:"1px solid #222",borderBottom:"1px solid #222"}});
   var s_=function(ico,col,txt){var d=h("div",{class:"f ac g6",style:{color:col}});d.innerHTML=I[ico];d.append(h("span",{style:{fontSize:"13px"}},txt));return d};
   stats.append(s_("wrench","#f59e0b",ready.length+" ready"),s_("blocked","#ef4444",blocked.length+" blocked"),s_("check","#22c55e",done.length+" done"));if(unverified.length>0)stats.append(h("div",{class:"f ac g6",style:{color:"#a855f7"}},h("span",{style:{fontSize:"13px"}},unverified.length+" triage")));root.append(stats);
-  if(partsCost>0||expCost>0||margin!==null){
+  if(taskCost>0||partsTrackerCost>0||expCost>0||margin!==null){
     var finB=h("div",{class:"fc g6",style:{padding:"12px 14px",background:margin!==null&&margin>=200?"rgba(34,197,94,0.04)":"rgba(239,68,68,0.04)",borderRadius:"10px",border:margin!==null&&margin>=200?"1px solid rgba(34,197,94,0.15)":"1px solid rgba(239,68,68,0.15)"}});
     finB.append(h("span",{style:{fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:margin!==null&&margin>=200?"#22c55e":"#ef4444"}},"Live P&L"));
-    var fr=h("div",{class:"f jb",style:{fontSize:"12px"}});
+    var fr=h("div",{class:"f g12 fw",style:{fontSize:"12px"}});
     fr.append(h("span",{style:{color:"#888"}},"Buy: $"+buyNum));
-    if(partsCost>0)fr.append(h("span",{style:{color:"#f59e0b"}},"Tasks: $"+partsCost));
+    if(taskCost>0)fr.append(h("span",{style:{color:"#f59e0b"}},"Tasks: $"+$$(taskCost)));
+    if(partsTrackerCost>0)fr.append(h("span",{style:{color:"#60a5fa"}},"Parts: $"+$$(partsTrackerCost)));
     if(expCost>0)fr.append(h("span",{style:{color:"#f59e0b"}},"Expenses: $"+$$(expCost)));
     finB.append(fr);
     var fr2=h("div",{class:"f jb",style:{fontSize:"13px",fontWeight:700,paddingTop:"4px",borderTop:"1px solid rgba(255,255,255,0.05)"}});
@@ -1082,7 +1084,7 @@ function rBikeView(){
   }else if(ui.bTab.startsWith("cl_"))root.append(rChecklist(bike,ui.bTab.replace("cl_","")));
   if(!ui.sellFlow){root.append(h("button",{style:{background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"6px",color:"#22c55e",padding:"12px",fontSize:"13px",fontWeight:700,width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",marginTop:"12px"},onClick:function(){ui.sellFlow=1;ui.sellDate=today();R()}},ic("sold")," Mark as Sold"))
   }else{var sf=h("div",{class:"ep fc g12",style:{borderColor:"rgba(34,197,94,0.3)"}});sf.append(h("span",{class:"lbl",style:{color:"#22c55e"}},"Complete Sale"));var sp=h("input",{type:"text",value:ui.sellPrice,placeholder:"Final sell price",style:{borderColor:"rgba(34,197,94,0.3)"},onInput:function(e){ui.sellPrice=e.target.value}});var sd=h("input",{type:"date",value:ui.sellDate,onInput:function(e){ui.sellDate=e.target.value}});sf.append(sp,sd);
-    sf.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.sellFlow=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1,background:"#22c55e"},onClick:function(){if(!ui.sellPrice.trim()){flash("Need sell price");return}var sold=JSON.parse(JSON.stringify(bike));sold.soldPrice=ui.sellPrice.trim();sold.soldDate=ui.sellDate||today();sold.partsCost=partsCost;sold.expCost=expCost;sold.totalIn=totalIn;sold.daysOwned=daysBetween(bike.buyDate,ui.sellDate||today());sold.profit=$$(parseFloat(ui.sellPrice.replace(/[^0-9.]/g,""))-allIn);data.sold.push(sold);data.bikes=data.bikes.filter(function(b){return b.id!==bike.id});logAct("bike-sold",bike.name+" for $"+ui.sellPrice.trim(),"bike",bike.id);save();nav("home");flash("Sold! Profit: $"+$$(sold.profit))}},"Confirm Sale")));root.append(sf)}
+    sf.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.sellFlow=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1,background:"#22c55e"},onClick:function(){if(!ui.sellPrice.trim()){flash("Need sell price");return}var sold=JSON.parse(JSON.stringify(bike));sold.soldPrice=ui.sellPrice.trim();sold.soldDate=ui.sellDate||today();sold.taskCost=taskCost;sold.partsCost=partsTrackerCost;sold.expCost=expCost;sold.totalIn=totalIn;sold.daysOwned=daysBetween(bike.buyDate,ui.sellDate||today());sold.profit=$$(parseFloat(ui.sellPrice.replace(/[^0-9.]/g,""))-allIn);data.sold.push(sold);data.bikes=data.bikes.filter(function(b){return b.id!==bike.id});logAct("bike-sold",bike.name+" for $"+ui.sellPrice.trim(),"bike",bike.id);save();nav("home");flash("Sold! Profit: $"+$$(sold.profit))}},"Confirm Sale")));root.append(sf)}
   if(ui.cfDel===bike.id)root.append(confirm_("Delete this bike and all data?",function(){data.bikes=data.bikes.filter(function(b){return b.id!==bike.id});save();nav("home")},function(){ui.cfDel=null;R()}));
   else root.append(h("button",{class:"bd",style:{marginTop:"12px"},onClick:function(){ui.cfDel=bike.id;R()}},"Delete bike"));
   return root;
@@ -1167,7 +1169,7 @@ function rAnalytics(){
   var sources={};data.sold.forEach(function(b){var s=b.source||"Unknown";if(!sources[s])sources[s]={count:0,profit:0};sources[s].count++;sources[s].profit+=(b.profit||0)});
   if(Object.keys(sources).length>0){root.append(h("span",{class:"lbl"},"By Source"));Object.entries(sources).sort(function(a,b){return b[1].profit-a[1].profit}).forEach(function(e){root.append(h("div",{class:"f jb ac",style:{padding:"8px 12px",background:"rgba(255,255,255,0.03)",borderRadius:"6px",fontSize:"12px"}},h("span",{style:{color:"#e5e5e5"}},e[0]+" ("+e[1].count+")"),h("span",{style:{color:e[1].profit>=0?"#22c55e":"#ef4444"}},"$"+e[1].profit)))})}
   root.append(h("span",{class:"lbl",style:{marginTop:"8px"}},"Flip History"));
-  data.sold.slice().reverse().forEach(function(b){var card=h("div",{class:"sold-card fc g4"});card.append(h("div",{class:"f jb ac"},h("span",{style:{color:"#f5f5f5",fontWeight:700,fontSize:"14px"}},b.name),badge("sold")));var meta=h("div",{class:"f g12 fw",style:{fontSize:"11px"}});meta.append(h("span",{style:{color:"#ef4444"}},"Paid: $"+(b.actualBuyPrice||b.buyPrice||"?")));meta.append(h("span",{style:{color:"#22c55e"}},"Sold: $"+b.soldPrice));if(b.partsCost)meta.append(h("span",{style:{color:"#f59e0b"}},"Parts: $"+b.partsCost));if(b.expCost)meta.append(h("span",{style:{color:"#f59e0b"}},"Exp: $"+b.expCost));meta.append(h("span",{style:{color:b.profit>=0?"#22c55e":"#ef4444",fontWeight:700}},"Profit: $"+$$(b.profit)));if(b.daysOwned)meta.append(h("span",{style:{color:"#888"}},b.daysOwned+" days"));if(b.source)meta.append(h("span",{style:{color:"#555"}},"via "+b.source));card.append(meta);if(b.soldDate)card.append(h("span",{style:{color:"#555",fontSize:"10px"}},"Sold "+b.soldDate));root.append(card)});
+  data.sold.slice().reverse().forEach(function(b){var card=h("div",{class:"sold-card fc g4"});card.append(h("div",{class:"f jb ac"},h("span",{style:{color:"#f5f5f5",fontWeight:700,fontSize:"14px"}},b.name),badge("sold")));var meta=h("div",{class:"f g12 fw",style:{fontSize:"11px"}});meta.append(h("span",{style:{color:"#ef4444"}},"Paid: $"+(b.actualBuyPrice||b.buyPrice||"?")));meta.append(h("span",{style:{color:"#22c55e"}},"Sold: $"+b.soldPrice));if(b.taskCost)meta.append(h("span",{style:{color:"#f59e0b"}},"Tasks: $"+$$(b.taskCost)));if(b.partsCost)meta.append(h("span",{style:{color:"#60a5fa"}},"Parts: $"+$$(b.partsCost)));if(b.expCost)meta.append(h("span",{style:{color:"#f59e0b"}},"Exp: $"+$$(b.expCost)));meta.append(h("span",{style:{color:b.profit>=0?"#22c55e":"#ef4444",fontWeight:700}},"Profit: $"+$$(b.profit)));if(b.daysOwned)meta.append(h("span",{style:{color:"#888"}},b.daysOwned+" days"));if(b.source)meta.append(h("span",{style:{color:"#555"}},"via "+b.source));card.append(meta);if(b.soldDate)card.append(h("span",{style:{color:"#555",fontSize:"10px"}},"Sold "+b.soldDate));root.append(card)});
   return root;
 }
 
@@ -1315,9 +1317,10 @@ function rJobView(){
   var job=data.jobs.find(function(j){return j.id===selJob});if(!job){nav("home");return h("div")}
   var root=h("div",{class:"fc g16"});
   var ready=job.tasks.filter(function(t){return!t.done&&!t.blocked}),blocked=job.tasks.filter(function(t){return!t.done&&t.blocked}),done=job.tasks.filter(function(t){return t.done});
-  var partsCost=job.tasks.reduce(function(s,t){return s+(parseFloat(t.cost)||0)},0);
+  var taskCostJ=job.tasks.reduce(function(s,t){return t.costLogged?s:s+(parseFloat(t.cost)||0)},0);
+  var jobPartsCost=(job.parts||[]).reduce(function(s,p){return s+(parseFloat(p.cost)||0)},0);
   var expCost=data.expenses.filter(function(e){return e.bikeId===job.id}).reduce(function(s,e){return s+(parseFloat(e.amount)||0)},0);
-  var totalCost=partsCost+expCost;var quotedNum=$(job.quoted);
+  var totalCost=taskCostJ+jobPartsCost+expCost;var quotedNum=$(job.quoted);
 
   // Header
   var hdr=h("div",{class:"f as g12"});var bb=h("button",{class:"ib",style:{marginTop:"2px"},onClick:function(){nav("home")}});bb.innerHTML=I.back;hdr.append(bb);
@@ -1445,7 +1448,8 @@ function rJobView(){
     var finB=h("div",{class:"fc g6",style:{padding:"12px 14px",background:"rgba(34,211,238,0.04)",borderRadius:"10px",border:"1px solid rgba(34,211,238,0.15)"}});
     finB.append(h("span",{style:{fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",color:"#22d3ee"}},"Job Financials"));
     var fr=h("div",{class:"f jb fw",style:{fontSize:"12px"}});
-    if(partsCost>0)fr.append(h("span",{style:{color:"#f59e0b"}},"Parts: $"+$$(partsCost)));
+    if(taskCostJ>0)fr.append(h("span",{style:{color:"#f59e0b"}},"Tasks: $"+$$(taskCostJ)));
+    if(jobPartsCost>0)fr.append(h("span",{style:{color:"#60a5fa"}},"Parts: $"+$$(jobPartsCost)));
     if(expCost>0)fr.append(h("span",{style:{color:"#f59e0b"}},"Expenses: $"+$$(expCost)));
     if(laborTotal>0)fr.append(h("span",{style:{color:"#60a5fa"}},"Labor: $"+laborTotal+" ("+laborHrs.toFixed(1)+"h)"));
     finB.append(fr);
@@ -1691,6 +1695,23 @@ function rHome(){
       var totalActs=(data.activity||[]).length;
       leg.append(h("span",{style:{marginLeft:"auto",color:"#555"}},todayCount+" today · "+totalActs+" total"));
       actW.append(leg);
+
+      // Today's feed
+      var todayActs=(data.activity||[]).filter(function(a){return a.action!=="timer-start"&&new Date(a.ts).toISOString().split("T")[0]===todayStr}).sort(function(a,b){return b.ts-a.ts});
+      if(todayActs.length>0){
+        var dayFeed=h("div",{class:"fc g2",style:{marginTop:"6px"}});
+        dayFeed.append(h("span",{style:{color:"#f59e0b",fontSize:"9px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"Today · "+todayActs.length+" actions"));
+        var aI={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-stop":"⏱","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝","note-append":"📝","chat-send":"💬","part-add":"🔩","part-status":"🔩"};
+        var aC={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888","note-append":"#888","chat-send":"#22d3ee","part-add":"#60a5fa","part-status":"#60a5fa"};
+        todayActs.forEach(function(a){
+          var t=new Date(a.ts);var time=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
+          var row=h("div",{class:"f ac g6",style:{padding:"2px 0",fontSize:"11px"}});
+          row.append(h("span",{style:{color:"#444",fontSize:"10px",fontVariantNumeric:"tabular-nums",flexShrink:0,width:"36px"}},time));
+          row.append(h("span",{style:{color:aC[a.action]||"#888",fontSize:"10px",flexShrink:0}},aI[a.action]||"·"));
+          row.append(h("span",{style:{color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},a.detail||(a.action||"").replace(/-/g," ")));
+          dayFeed.append(row)});
+        actW.append(dayFeed);
+      }
     }
     tw.append(actW);
 
@@ -1851,7 +1872,7 @@ function rHome(){
       var card=h("button",{class:"card fc g6",onClick:function(){nav("bike",bike.id)}});var top=h("div",{class:"f ac g10"});if(bike.photo)top.append(h("img",{src:bike.photo,style:{width:"36px",height:"36px",minWidth:"36px",borderRadius:"6px",objectFit:"cover",border:"1px solid #333"}}));top.append(h("span",{style:{color:"#f5f5f5",fontSize:"16px",fontWeight:700,flex:1}},bike.name),badge(bike.type));card.append(top);
       if(bike.description)card.append(h("span",{style:{color:"#666",fontSize:"12px",lineHeight:1.3}},bike.description.slice(0,80)+(bike.description.length>80?"...":"")));
       if(bike.tasks.length>0){var st2=h("div",{class:"f g12",style:{fontSize:"12px"}});if(r>0)st2.append(h("span",{style:{color:"#f59e0b"}},r+" ready"));if(bl>0)st2.append(h("span",{style:{color:"#ef4444"}},bl+" blocked"));if(dn>0)st2.append(h("span",{style:{color:"#22c55e"}},dn+" done"));if(uv>0)st2.append(h("span",{style:{color:"#a855f7"}},uv+" triage"));card.append(st2)}
-      var pc=bike.tasks.reduce(function(s,t){return s+(parseFloat(t.cost)||0)},0);var ec=data.expenses.filter(function(e){return e.bikeId===bike.id}).reduce(function(s,e){return s+(parseFloat(e.amount)||0)},0);var ai2=$(bike.actualBuyPrice||bike.buyPrice)+pc+ec;
+      var pc=bike.tasks.reduce(function(s,t){return t.costLogged?s:s+(parseFloat(t.cost)||0)},0);var ptc=(bike.parts||[]).reduce(function(s,p){return s+(parseFloat(p.cost)||0)},0);var ec=data.expenses.filter(function(e){return e.bikeId===bike.id}).reduce(function(s,e){return s+(parseFloat(e.amount)||0)},0);var ai2=$(bike.actualBuyPrice||bike.buyPrice)+pc+ptc+ec;
       var pr2=h("div",{class:"f g12 fw",style:{fontSize:"11px"}});if(ai2>0)pr2.append(h("span",{style:{color:"#ef4444"}},"All-in: $"+$$(ai2)));if(bike.targetSell){var m2=$$($(bike.targetSell)-ai2);pr2.append(h("span",{style:{color:m2>=200?"#22c55e":"#ef4444"}},"Margin: $"+$$(m2)))}if(bike.buyDate)pr2.append(h("span",{style:{color:"#555"}},"Day "+daysBetween(bike.buyDate,today())));card.append(pr2);list.append(card)});
     if(ui.addBike){var p=h("div",{class:"ep fc g12"});var ni=h("input",{type:"text",placeholder:"Bike name"});setTimeout(function(){ni.focus()},50);var ty="flip";var tr=h("div",{class:"f g8"});["rider","flip"].forEach(function(t){var b=h("button",{style:{flex:1,padding:"8px 12px",background:t==="flip"?"rgba(168,85,247,0.15)":"rgba(255,255,255,0.03)",border:t==="flip"?"1px solid #a855f7":"1px solid #333",borderRadius:"6px",cursor:"pointer",color:t==="flip"?"#a855f7":"#777",fontSize:"13px",fontWeight:600,textTransform:"uppercase"},onClick:function(e){ty=t;tr.querySelectorAll("button").forEach(function(x){x.style.background="rgba(255,255,255,0.03)";x.style.border="1px solid #333";x.style.color="#777"});var col=t==="rider"?"#60a5fa":"#a855f7";e.currentTarget.style.background=t==="rider"?"rgba(59,130,246,0.15)":"rgba(168,85,247,0.15)";e.currentTarget.style.border="1px solid "+col;e.currentTarget.style.color=col}},t);tr.append(b)});var di=h("textarea",{rows:"3",placeholder:"Description"});var bpI=h("input",{type:"text",placeholder:"Buy price"});p.append(ni,tr,di,bpI,h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.addBike=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1},onClick:function(){if(!ni.value.trim())return;data.bikes.push({id:mid(),name:ni.value.trim(),type:ty,description:di.value.trim(),buyPrice:bpI.value.trim(),actualBuyPrice:"",targetSell:"",buyDate:today(),source:"",workLog:"",tasks:[],checklistTemplates:JSON.parse(JSON.stringify(data.checklistTemplates)),photo:null,specs:{}});logAct("bike-add",ni.value.trim(),"bike","");ui.addBike=0;save();R()}},"Add Bike")));list.append(p)}
     else if(data.bikes.length<2){var ab2=h("button",{class:"bg",onClick:function(){ui.addBike=1;R()}});ab2.innerHTML=I.plus+" Add bike";list.append(ab2)}
