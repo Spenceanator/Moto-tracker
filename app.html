@@ -136,7 +136,7 @@ function renderNav(){
     var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.6.2";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.6.3";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -1728,16 +1728,40 @@ function rHome(){
     var weekParts=weekActs.filter(function(a){return a.action==="part-add"}).length;
     var weekNotes=weekActs.filter(function(a){return a.action==="note-add"||a.action==="note-append"}).length;
     if(weekActs.length>0){
+      var weekOpen=ui.weekOpen;
       var sumSec=h("div",{class:"fc g4",style:{padding:"12px",background:"rgba(255,255,255,0.02)",borderRadius:"10px",border:"1px solid #1a1a1a"}});
-      sumSec.append(h("span",{style:{color:"#888",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"This Week"));
-      var sumRow=h("div",{class:"f g12 fw",style:{fontSize:"12px"}});
-      if(weekTasks>0)sumRow.append(h("span",{style:{color:"#22c55e"}},weekTasks+" tasks done"));
-      if(weekTimerSecs>0){var wh=Math.floor(weekTimerSecs/3600);var wm=Math.floor((weekTimerSecs%3600)/60);sumRow.append(h("span",{style:{color:"#60a5fa"}},wh+"h "+wm+"m logged"))}
-      if(weekExpense>0)sumRow.append(h("span",{style:{color:"#f59e0b"}},"$"+$$(weekExpense)+" spent"));
-      if(weekParts>0)sumRow.append(h("span",{style:{color:"#60a5fa"}},weekParts+" parts ordered"));
-      if(weekNotes>0)sumRow.append(h("span",{style:{color:"#888"}},weekNotes+" notes"));
-      sumRow.append(h("span",{style:{color:"#555"}},weekActs.length+" actions"));
-      sumSec.append(sumRow);tw.append(sumSec)}
+      var sumHdr=h("button",{class:"f ac g6",style:{padding:0,width:"100%"},onClick:function(){ui.weekOpen=!weekOpen;R()}});
+      var wch=document.createElement("span");wch.innerHTML=chev(weekOpen);wch.style.cssText="display:flex;color:#888";
+      sumHdr.append(wch,h("span",{style:{color:"#888",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",flex:1,textAlign:"left"}},"This Week"));
+      var sumBadges=h("div",{class:"f g8 fw",style:{fontSize:"10px"}});
+      if(weekTasks>0)sumBadges.append(h("span",{style:{color:"#22c55e"}},weekTasks+"✓"));
+      if(weekTimerSecs>0){var wh=Math.floor(weekTimerSecs/3600);var wm=Math.floor((weekTimerSecs%3600)/60);sumBadges.append(h("span",{style:{color:"#60a5fa"}},wh+"h"+wm+"m"))}
+      if(weekExpense>0)sumBadges.append(h("span",{style:{color:"#f59e0b"}},"$"+$$(weekExpense)));
+      sumBadges.append(h("span",{style:{color:"#444"}},weekActs.length+""));
+      sumHdr.append(sumBadges);sumSec.append(sumHdr);
+      if(weekOpen){
+        var wIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-stop":"⏱","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝","note-append":"📝","chat-send":"💬","part-add":"🔩","part-status":"🔩"};
+        var wColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888","note-append":"#888","chat-send":"#22d3ee","part-add":"#60a5fa","part-status":"#60a5fa"};
+        // Group by day
+        var byDay={};weekActs.filter(function(a){return a.action!=="timer-start"}).sort(function(a,b){return b.ts-a.ts}).forEach(function(a){
+          var d=new Date(a.ts).toISOString().split("T")[0];if(!byDay[d])byDay[d]=[];byDay[d].push(a)});
+        var dayKeys=Object.keys(byDay).sort(function(a,b){return b<a?-1:1});
+        var wFeed=h("div",{class:"fc g2",style:{marginTop:"8px",maxHeight:"300px",overflowY:"auto"}});
+        dayKeys.forEach(function(day){
+          var dayDate=new Date(day+"T12:00:00");
+          var dayLabel=dayDate.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+          var isToday_=day===todayStr;
+          wFeed.append(h("div",{style:{color:isToday_?"#f59e0b":"#444",fontSize:"10px",fontWeight:700,padding:"6px 0 2px",borderTop:"1px solid #1a1a1a",marginTop:"4px"}},isToday_?"Today":dayLabel));
+          byDay[day].forEach(function(a){
+            var t=new Date(a.ts);var time=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
+            var row=h("div",{class:"f ac g6",style:{padding:"2px 0",fontSize:"11px"}});
+            row.append(h("span",{style:{color:"#444",fontSize:"10px",fontVariantNumeric:"tabular-nums",flexShrink:0,width:"36px"}},time));
+            row.append(h("span",{style:{color:wColors[a.action]||"#888",fontSize:"10px",flexShrink:0}},wIcons[a.action]||"·"));
+            row.append(h("span",{style:{color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},a.detail||(a.action||"").replace(/-/g," ")));
+            wFeed.append(row)});
+        });
+        sumSec.append(wFeed)}
+      tw.append(sumSec)}
 
     // Running timer banner — just shows what's active, not a launcher
     var runningJobs=data.jobs.filter(function(j){return j.timerStart});
