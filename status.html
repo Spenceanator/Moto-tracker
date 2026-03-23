@@ -170,7 +170,7 @@ function render(job){
     var msg=chatTa.value.trim();if(!msg)return;
     chatBtn.disabled=true;chatBtn.textContent="...";
     fetch(SB_URL+"/rest/v1/job_chat",{method:"POST",headers:{"apikey":SB_KEY,"Content-Type":"application/json","Prefer":"return=minimal"},
-      body:JSON.stringify({token:getToken(),sender:"customer",message:msg})
+      body:JSON.stringify({token:getToken(),sender:"customer",message:msg,user_agent:navigator.userAgent})
     }).then(function(){chatTa.value="";loadChat()}).catch(function(){}).finally(function(){chatBtn.disabled=false;chatBtn.textContent="Send"});
   };
   chatTa.onkeydown=function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();chatBtn.click()}};

@@ -119,7 +119,7 @@ function renderNav(){
   if(a){var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.0.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.2.0";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -225,18 +225,73 @@ function loadJobChat(token){
       var isMech=m.sender==="mechanic";
       var div=h("div",{style:{alignSelf:isMech?"flex-end":"flex-start",maxWidth:"85%",padding:"8px 12px",borderRadius:"10px",fontSize:"12px",lineHeight:"1.4",wordWrap:"break-word",background:isMech?"rgba(34,211,238,0.08)":"rgba(245,158,11,0.12)",border:isMech?"1px solid rgba(34,211,238,0.15)":"1px solid rgba(245,158,11,0.2)"}});
       div.append(h("div",null,m.message));
-      div.append(h("div",{style:{fontSize:"9px",color:"#555",marginTop:"2px"}},(isMech?"You":"Customer")+" · "+new Date(m.created_at).toLocaleString()));
+      var metaText=(isMech?(m.sender_email||"You"):"Customer")+" · "+new Date(m.created_at).toLocaleString();
+      if(!isMech&&m.user_agent){var ua=m.user_agent;var short=ua.indexOf("Mobile")>-1?"Mobile":"Desktop";metaText+=" · "+short}
+      div.append(h("div",{style:{fontSize:"9px",color:"#555",marginTop:"2px"}},metaText));
       box.append(div);
     });
     box.scrollTop=box.scrollHeight;
-    // Update chat tab label with unread indicator
-    var custMsgs=msgs.filter(function(m){return m.sender==="customer"});
-    if(custMsgs.length>0){
-      var tabs=document.querySelectorAll(".nt");
-      tabs.forEach(function(t){if(t.textContent.indexOf("Chat")===0)t.textContent="Chat ("+custMsgs.length+")"});
-    }
+    // Mark as read
+    _chatRead[token]=Date.now();try{localStorage.setItem("drydock_chat_read",JSON.stringify(_chatRead))}catch(e){}
   }).catch(function(){});
 }
+
+// ============ UNREAD CHAT TRACKING ============
+var _chatRead={};try{_chatRead=JSON.parse(localStorage.getItem("drydock_chat_read"))||{}}catch(e){}
+var _chatCounts={};
+var _lastNotifTs=0;
+
+function requestNotifPermission(){
+  if("Notification" in window && Notification.permission==="default"){
+    Notification.requestPermission();
+  }
+}
+function sendNotif(title,body){
+  if("Notification" in window && Notification.permission==="granted"){
+    try{new Notification(title,{body:body,icon:"",tag:"drydock-"+Date.now()})}catch(e){}
+  }
+}
+function pingSound(){
+  try{var ctx=new(window.AudioContext||window.webkitAudioContext)();var osc=ctx.createOscillator();var gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=880;osc.type="sine";gain.gain.value=0.08;osc.start();gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);osc.stop(ctx.currentTime+0.3)}catch(e){}
+}
+
+function pollAllChats(){
+  var tokens=data.jobs.filter(function(j){return j.shareToken&&j.status!=="delivered"}).map(function(j){return j.shareToken});
+  if(tokens.length===0)return;
+  // Fetch recent customer messages for all active shared jobs
+  var tokenFilter=tokens.map(function(t){return"token.eq."+t}).join(",");
+  fetch(SB_URL+"/rest/v1/job_chat?or=("+tokenFilter+")&sender=eq.customer&order=created_at.desc&limit=50",{method:"GET",headers:sbHeaders()})
+  .then(function(r){return r.json()}).then(function(msgs){
+    if(!msgs)return;
+    var newUnread=0;var prevTotal=Object.keys(_chatCounts).reduce(function(s,k){return s+(_chatCounts[k]||0)},0);
+    _chatCounts={};
+    msgs.forEach(function(m){
+      var lastRead=_chatRead[m.token]||0;
+      var msgTime=new Date(m.created_at).getTime();
+      if(msgTime>lastRead){
+        if(!_chatCounts[m.token])_chatCounts[m.token]=0;
+        _chatCounts[m.token]++;
+      }
+    });
+    var totalUnread=Object.keys(_chatCounts).reduce(function(s,k){return s+_chatCounts[k]},0);
+    if(totalUnread>prevTotal&&totalUnread>0&&Date.now()-_lastNotifTs>30000){
+      _lastNotifTs=Date.now();
+      var job=data.jobs.find(function(j){return j.shareToken&&_chatCounts[j.shareToken]>0});
+      var custName=job?job.customer:"Customer";
+      sendNotif("Drydock Message",custName+" sent a message");
+      pingSound();
+    }
+    // Update nav badge
+    updateUnreadBadge(totalUnread);
+  }).catch(function(){});
+}
+function getUnreadTotal(){return Object.keys(_chatCounts).reduce(function(s,k){return s+(_chatCounts[k]||0)},0)}
+function updateUnreadBadge(count){
+  var el=document.getElementById("chat-badge");
+  if(el){el.textContent=count>0?count:"";el.style.display=count>0?"inline-block":"none"}
+}
+// Request notification permission on first interaction
+document.addEventListener("click",function(){requestNotifPermission()},{once:true});
 
 // ============ SUPABASE SYNC ============
 var _syncTimer=null,_syncing=0,_lastPushTs=0,_pollInt=null,_localDirty=0;
@@ -294,11 +349,19 @@ function pollCheck(){
 }
 // ============ INTAKE ============
 var _intakeItems=[];
+var _unreadChats=[];// [{jobId, jobLabel, token, count, lastMsg}]
+var _lastChatPoll=0;
+var _notifPermission=typeof Notification!=="undefined"?Notification.permission:"denied";
 function fetchIntake(cb,force){
   if(!getAuth()){if(cb)cb();return}
   fetch(SB_URL+"/rest/v1/intake?status=eq.pending&order=created_at.desc",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
-    var prev=_intakeItems.length;_intakeItems=rows||[];if(force||_intakeItems.length!==prev){if(cb)cb()}
+    var prev=_intakeItems.length;_intakeItems=rows||[];
+    if(_intakeItems.length>prev&&prev>=0){
+      sendNotif("Drydock Request",(_intakeItems[0].customer_name||"Someone")+" submitted a service request");
+      pingSound();
+    }
+    if(force||_intakeItems.length!==prev){if(cb)cb()}
   }).catch(function(){if(cb)cb()})
 }
 function acceptIntake(item){
@@ -1201,7 +1264,7 @@ function rJobView(){
     var chatSend=h("button",{class:"bp",style:{padding:"8px 16px",fontSize:"12px",alignSelf:"flex-end"},onClick:function(){
       var msg=chatIn.value.trim();if(!msg)return;
       chatSend.disabled=true;chatSend.textContent="...";
-      fetch(SB_URL+"/rest/v1/job_chat",{method:"POST",headers:sbHeaders(),body:JSON.stringify({token:job.shareToken,sender:"mechanic",message:msg})})
+      var auth_=getAuth();fetch(SB_URL+"/rest/v1/job_chat",{method:"POST",headers:sbHeaders(),body:JSON.stringify({token:job.shareToken,sender:"mechanic",message:msg,sender_email:auth_?auth_.email:"",user_agent:navigator.userAgent})})
       .then(function(){chatIn.value="";logAct("chat-send",msg.slice(0,40),"job",job.id);loadJobChat(job.shareToken)})
       .catch(function(){flash("Send failed")})
       .finally(function(){chatSend.disabled=false;chatSend.textContent="Send"});
@@ -1343,7 +1406,8 @@ function rHome(){
   var nvb=h("div",{class:"nb"});
   var activeJobs=data.jobs.filter(function(j){return j.status!=="delivered"}).length;
   var readyCount=0;data.bikes.forEach(function(b){readyCount+=b.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}).length});data.jobs.forEach(function(j){if(j.status==="intake"||j.status==="in-progress")readyCount+=j.tasks.filter(function(t){return!t.done&&!t.blocked&&t.verified}).length});
-  ["today","bikes","leads","jobs","clients","sold","expenses"].forEach(function(t){var labels={today:"Today"+(readyCount?" ("+readyCount+")":""),bikes:"Bikes ("+data.bikes.length+")",leads:"Leads ("+data.leads.length+")",jobs:"Jobs"+(activeJobs?" ("+activeJobs+")":"")+(_intakeItems.length?" +"+_intakeItems.length:""),clients:"Clients ("+data.customers.length+")",sold:"Sold ("+data.sold.length+")",expenses:"$"};
+  var unreadTotal=getUnreadTotal();
+  ["today","bikes","leads","jobs","clients","sold","expenses"].forEach(function(t){var labels={today:"Today"+(readyCount?" ("+readyCount+")":"")+(unreadTotal?" 💬"+unreadTotal:""),bikes:"Bikes ("+data.bikes.length+")",leads:"Leads ("+data.leads.length+")",jobs:"Jobs"+(activeJobs?" ("+activeJobs+")":"")+(_intakeItems.length?" +"+_intakeItems.length:""),clients:"Clients ("+data.customers.length+")",sold:"Sold ("+data.sold.length+")",expenses:"$"};
     nvb.append(h("button",{class:"nt"+(hTab===t?" a":""),onClick:function(){hTab=t;ui.addBike=0;ui.addLead=0;ui.addJob=0;ui.showPaste=0;ui.leadFilter=null;ui.jobFilter="active";ui.addExp=0;ui.addTrip=0;ui.scanLead=0;R()}},labels[t]))});root.append(nvb);
 
   if(hTab==="today"){
@@ -1416,6 +1480,22 @@ function rHome(){
       }
     }
     tw.append(actW);
+
+    // Unread messages
+    var unreadJobs=data.jobs.filter(function(j){return j.shareToken&&_chatCounts[j.shareToken]>0});
+    if(unreadJobs.length>0){
+      var msgSec=h("div",{class:"fc g4",style:{padding:"12px",background:"rgba(245,158,11,0.06)",borderRadius:"10px",border:"1px solid rgba(245,158,11,0.2)"}});
+      var totalUn=getUnreadTotal();
+      msgSec.append(h("span",{style:{color:"#f59e0b",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"💬 Unread Messages ("+totalUn+")"));
+      unreadJobs.forEach(function(j){
+        var vt=[j.vehicleYear,j.vehicleMake,j.vehicleModel].filter(Boolean).join(" ")||"Job";
+        var label=(j.customer?j.customer+" — ":"")+vt;
+        var count=_chatCounts[j.shareToken]||0;
+        var row=h("button",{class:"f ac jb",style:{padding:"8px 0",width:"100%",textAlign:"left"},onClick:function(){nav("job",j.id);setTimeout(function(){ui.bTab="chat";R()},50)}});
+        row.append(h("span",{style:{color:"#f5f5f5",fontSize:"12px",flex:1}},label));
+        row.append(h("span",{style:{background:"#f59e0b",color:"#000",fontSize:"10px",fontWeight:700,padding:"2px 8px",borderRadius:"10px"}},count+""));
+        msgSec.append(row)});
+      tw.append(msgSec)}
 
     // Collect all ready tasks across bikes and jobs
     var sections=[];
@@ -1796,6 +1876,10 @@ R();renderNav();syncPull(function(){R();startPoll();fetchIntake(function(){R()})
 document.addEventListener("visibilitychange",function(){if(!document.hidden){pollCheck();startPoll();fetchIntake(function(){R()})}});
 // Poll intake every 30s
 setInterval(function(){fetchIntake(function(){R()})},30000);
+// Poll chats every 20s
+setInterval(function(){pollAllChats()},20000);
+// Initial chat poll
+setTimeout(function(){pollAllChats()},2000);
 </script>
 </body>
 </html>
