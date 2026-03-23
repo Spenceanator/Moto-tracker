@@ -136,7 +136,7 @@ function renderNav(){
     var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
 }
 
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.6.1";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="5.6.2";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -1386,7 +1386,8 @@ function rJobView(){
   var timerBtns=h("div",{class:"f g6"});
   // Start/stop
   var togBtn=h("button",{style:{padding:"8px 16px",borderRadius:"8px",fontSize:"12px",fontWeight:700,border:"none",cursor:"pointer",background:isRunning?"rgba(239,68,68,0.15)":"rgba(34,197,94,0.15)",color:isRunning?"#ef4444":"#22c55e"},onClick:function(){
-    if(job.timerStart){job.laborSeconds=getJobSecs(job);job.timerStart=null;logAct("timer-stop",fmtTime(job.laborSeconds),"job",job.id)}else{job.timerStart=Date.now();startTimerTick();logAct("timer-start","","job",job.id)}
+    var jvt=[job.vehicleYear,job.vehicleMake,job.vehicleModel].filter(Boolean).join(" ")||"Job";
+    if(job.timerStart){job.laborSeconds=getJobSecs(job);job.timerStart=null;logAct("timer-stop",fmtTime(job.laborSeconds)+" on "+(job.customer?job.customer+" — ":"")+jvt,"job",job.id)}else{job.timerStart=Date.now();startTimerTick()}
     save();R()}},isRunning?"Stop":"Start");
   timerBtns.append(togBtn);
   // Manual adjust
@@ -1685,11 +1686,11 @@ function rHome(){
       actW.append(leg);
 
       // Today's activity feed
-      var todayActs=(data.activity||[]).filter(function(a){return new Date(a.ts).toISOString().split("T")[0]===todayStr}).sort(function(a,b){return b.ts-a.ts});
+      var todayActs=(data.activity||[]).filter(function(a){return a.action!=="timer-start"&&new Date(a.ts).toISOString().split("T")[0]===todayStr}).sort(function(a,b){return b.ts-a.ts});
       if(todayActs.length>0){
         var feedW=h("div",{class:"fc g2",style:{marginTop:"6px",maxHeight:"160px",overflowY:"auto",padding:"8px 10px",background:"rgba(245,158,11,0.04)",borderRadius:"8px",border:"1px solid rgba(245,158,11,0.1)"}});
-        var actIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-start":"▶","timer-stop":"■","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝","note-append":"📝","chat-send":"💬","part-add":"🔩","part-status":"🔩"};
-        var actColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-start":"#60a5fa","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888","note-append":"#888","chat-send":"#22d3ee","part-add":"#60a5fa","part-status":"#60a5fa"};
+        var actIcons={"task-done":"✓","task-undone":"↩","job-status":"◆","timer-stop":"⏱","expense-add":"$","trip-log":"🚗","job-created":"＋","lead-add":"◎","lead-convert":"⇒","bike-add":"🏍","bike-sold":"💰","note-add":"📝","note-append":"📝","chat-send":"💬","part-add":"🔩","part-status":"🔩"};
+        var actColors={"task-done":"#22c55e","task-undone":"#888","job-status":"#22d3ee","timer-stop":"#60a5fa","expense-add":"#f59e0b","trip-log":"#a855f7","job-created":"#22d3ee","lead-add":"#22d3ee","lead-convert":"#a855f7","bike-add":"#a855f7","bike-sold":"#22c55e","note-add":"#888","note-append":"#888","chat-send":"#22d3ee","part-add":"#60a5fa","part-status":"#60a5fa"};
         todayActs.forEach(function(a){
           var t=new Date(a.ts);var time=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
           var row=h("div",{class:"f ac g6",style:{padding:"3px 0",fontSize:"11px"}});
@@ -1722,7 +1723,7 @@ function rHome(){
     var weekAgo=Date.now()-7*86400000;
     var weekActs=(data.activity||[]).filter(function(a){return a.ts>weekAgo});
     var weekTasks=weekActs.filter(function(a){return a.action==="task-done"}).length;
-    var weekTimerSecs=0;weekActs.filter(function(a){return a.action==="timer-stop"}).forEach(function(a){var m=a.detail.match(/(\d+):(\d+):(\d+)/);if(m)weekTimerSecs+=(parseInt(m[1])||0)*3600+(parseInt(m[2])||0)*60+(parseInt(m[3])||0)});
+    var weekTimerSecs=0;weekActs.filter(function(a){return a.action==="timer-stop"}).forEach(function(a){var hm=a.detail.match(/(\d+)h/);var mm=a.detail.match(/(\d+)m/);var sm=a.detail.match(/(\d+)s/);weekTimerSecs+=(hm?parseInt(hm[1]):0)*3600+(mm?parseInt(mm[1]):0)*60+(sm?parseInt(sm[1]):0)});
     var weekExpense=weekActs.filter(function(a){return a.action==="expense-add"}).reduce(function(s,a){var m=a.detail.match(/\$(\d+\.?\d*)/);return s+(m?parseFloat(m[1]):0)},0);
     var weekParts=weekActs.filter(function(a){return a.action==="part-add"}).length;
     var weekNotes=weekActs.filter(function(a){return a.action==="note-add"||a.action==="note-append"}).length;
@@ -1749,7 +1750,7 @@ function rHome(){
         var timerDisp=h("span",{style:{color:"#60a5fa",fontSize:"16px",fontWeight:700,fontVariantNumeric:"tabular-nums"},id:"today-timer-"+j.id},fmtTime(secs));
         banner.append(timerDisp);
         banner.append(h("span",{style:{color:"#e5e5e5",fontSize:"12px",flex:1}},label));
-        banner.append(h("button",{style:{padding:"4px 12px",borderRadius:"6px",fontSize:"11px",fontWeight:700,border:"none",cursor:"pointer",background:"rgba(239,68,68,0.15)",color:"#ef4444"},onClick:function(e){e.stopPropagation();j.laborSeconds=getJobSecs(j);j.timerStart=null;logAct("timer-stop",fmtTime(j.laborSeconds),"job",j.id);save();R()}},"Stop"));
+        banner.append(h("button",{style:{padding:"4px 12px",borderRadius:"6px",fontSize:"11px",fontWeight:700,border:"none",cursor:"pointer",background:"rgba(239,68,68,0.15)",color:"#ef4444"},onClick:function(e){e.stopPropagation();j.laborSeconds=getJobSecs(j);j.timerStart=null;logAct("timer-stop",fmtTime(j.laborSeconds)+" on "+label,"job",j.id);save();R()}},"Stop"));
         tw.append(banner)});
       // Tick the today timers
       startTimerTick();
