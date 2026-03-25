@@ -122,7 +122,7 @@
             var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
     }
 
-    var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.1.0";
+    var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.1.2";
     var DT=[
         {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
         {id:"release",name:"Release",items:[
@@ -512,7 +512,8 @@
     function $(v){return parseFloat(S(v).replace(/[^0-9.]/g,""))||0}
     function $$(v){return Math.round(v*100)/100}
     function daysBetween(a,b){if(!a||!b)return 0;return Math.round((new Date(b)-new Date(a))/(1e3*60*60*24))}
-    function today(){return new Date().toISOString().split("T")[0]}
+    function today(){var d=new Date();return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2)}
+    function localDateStr(ts){var d=ts instanceof Date?ts:new Date(ts);return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2)}
     function fmtTime(sec){var h=Math.floor(sec/3600);var m=Math.floor((sec%3600)/60);var s=Math.floor(sec%60);return(h?h+"h ":"")+("0"+m).slice(-2)+"m "+("0"+s).slice(-2)+"s"}
     function getJobSecs(job){var base=job.laborSeconds||0;if(job.timerStart)base+=Math.floor((Date.now()-job.timerStart)/1000);return base}
     // Timer tick for running jobs
@@ -593,7 +594,7 @@
     function chev(o){return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate('+(o?90:0)+'deg);transition:transform .15s"><path d="M5 3l4 4-4 4"/></svg>'}
 
     var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";
-    var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[],logEdit:null,activeTask:null,partExp:null,logType:"note",_recvParts:{}};
+    var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[],logEdit:null,activeTask:null,partExp:null,logType:"note",_recvParts:{},listingDraft:null};
     var st=null;
     function ss(){if(st)clearTimeout(st);st=setTimeout(save,200)}
     function nav(v,id){cv=v;selBike=v==="bike"?id:null;selLead=v==="lead"?id:null;selJob=v==="job"?id:null;selClient=v==="client"?id:null;ui=Object.assign({},ui,{addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,tExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,sellFlow:0,sellPrice:"",sellDate:"",scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]});R()}
@@ -676,8 +677,8 @@
     function rLog(entity,entityType,entityId){
         if(!entity.log)entity.log=[];
         var w=h("div",{class:"fc g10"});
-        var todayStr=new Date().toISOString().split("T")[0];
-        var todayEntry=entity.log.slice().sort(function(a,b){return b.ts-a.ts}).find(function(e){return new Date(e.ts).toISOString().split("T")[0]===todayStr&&(e.type||"note")==="note"});
+        var todayStr=today();
+        var todayEntry=entity.log.slice().sort(function(a,b){return b.ts-a.ts}).find(function(e){return localDateStr(new Date(e.ts))===todayStr&&(e.type||"note")==="note"});
 
         // Quick-log type buttons
         var qRow=h("div",{class:"f g6 fw"});
@@ -1040,6 +1041,78 @@
         ));return w;
     }
 
+
+    // ============ LISTING GENERATOR ============
+    function generateListing(bike){
+        var lines=[];
+        // Title
+        lines.push(bike.name);
+        lines.push("");
+
+        // Price
+        var price=$(bike.targetSell)||$(bike.actualBuyPrice||bike.buyPrice);
+        if(price>0)lines.push("Asking: $"+price);
+        lines.push("");
+
+        // Core specs
+        var sp=bike.specs||{};
+        var specLines=[];
+        if(sp.oilType)specLines.push("Oil: "+sp.oilType);
+        if(sp.tireSizeFront&&sp.tireSizeRear)specLines.push("Tires: "+sp.tireSizeFront+" / "+sp.tireSizeRear);
+        if(sp.fuelType)specLines.push("Fuel: "+sp.fuelType);
+        if(specLines.length>0){lines.push(specLines.join(" | "));lines.push("")}
+
+        // Description
+        if(bike.description){lines.push(bike.description);lines.push("")}
+
+        // Work completed
+        var done=bike.tasks.filter(function(t){return t.done});
+        if(done.length>0){
+            lines.push("Recent work done:");
+            done.forEach(function(t){lines.push("• "+t.name)});
+            lines.push("");
+        }
+
+        // Parts installed
+        var installed=(bike.parts||[]).filter(function(p){return p.status==="installed"});
+        if(installed.length>0){
+            lines.push("New parts:");
+            installed.forEach(function(p){lines.push("• "+p.name)});
+            lines.push("");
+        }
+
+        // Known issues — be honest
+        var issues=bike.tasks.filter(function(t){return!t.done&&t.verified});
+        var blocked=bike.tasks.filter(function(t){return!t.done&&t.blocked});
+        if(issues.length>0||blocked.length>0){
+            lines.push("Known issues:");
+            issues.concat(blocked).forEach(function(t){
+                var note=t.name;
+                if(t.blockedReason)note+=" ("+t.blockedReason+")";
+                lines.push("• "+note);
+            });
+            lines.push("");
+        }
+
+        // Checklist status
+        var release=(bike.checklistTemplates||[]).find(function(t){return t.id==="release"});
+        if(release){
+            var checked=bike["checked_release"]||{};
+            var total=release.items.length;
+            var done2=Object.keys(checked).filter(function(k){return checked[k]}).length;
+            if(done2>0)lines.push("Pre-sale inspection: "+done2+"/"+total+" items checked");
+            lines.push("");
+        }
+
+        // Mileage from log
+        var totalMiles=(bike.log||[]).filter(function(e){return e.type==="ride"&&e.miles}).reduce(function(s,e){return s+(e.miles||0)},0);
+        if(totalMiles>0)lines.push("Test ridden "+totalMiles+" miles since service.");
+
+        lines.push("");
+        lines.push("Clean title in hand. Cash or Venmo.");
+
+        return lines.join("\n").replace(/\n{3,}/g,"\n\n").trim();
+    }
     // ============ LEAD VIEW ============
     function rLeadView(){
         var lead=data.leads.find(function(l){return l.id===selLead});
@@ -1169,8 +1242,21 @@
         }else if(ui.bTab==="parts"){root.append(rParts(bike,"bike",bike.id));
         }else if(ui.bTab==="log"){root.append(rLog(bike,"bike",bike.id));
         }else if(ui.bTab.startsWith("cl_"))root.append(rChecklist(bike,ui.bTab.replace("cl_","")));
-        if(!ui.sellFlow){root.append(h("button",{style:{background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"6px",color:"#22c55e",padding:"12px",fontSize:"13px",fontWeight:700,width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",marginTop:"12px"},onClick:function(){ui.sellFlow=1;ui.sellDate=today();R()}},ic("sold")," Mark as Sold"))
-        }else{var sf=h("div",{class:"ep fc g12",style:{borderColor:"rgba(34,197,94,0.3)"}});sf.append(h("span",{class:"lbl",style:{color:"#22c55e"}},"Complete Sale"));var sp=h("input",{type:"text",value:ui.sellPrice,placeholder:"Final sell price",style:{borderColor:"rgba(34,197,94,0.3)"},onInput:function(e){ui.sellPrice=e.target.value}});var sd=h("input",{type:"date",value:ui.sellDate,onInput:function(e){ui.sellDate=e.target.value}});sf.append(sp,sd);
+        if(!ui.sellFlow&&!ui.listingDraft){
+            var btnRow2=h("div",{class:"f g8",style:{marginTop:"12px"}});
+            btnRow2.append(h("button",{style:{flex:1,background:"rgba(96,165,250,0.08)",border:"1px solid rgba(96,165,250,0.2)",borderRadius:"6px",color:"#60a5fa",padding:"12px",fontSize:"13px",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:"8px"},onClick:function(){ui.listingDraft=generateListing(bike);R()}},"📋 Generate Listing"));
+            btnRow2.append(h("button",{style:{flex:1,background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"6px",color:"#22c55e",padding:"12px",fontSize:"13px",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:"8px"},onClick:function(){ui.sellFlow=1;ui.sellDate=today();R()}},ic("sold")," Mark as Sold"));
+            root.append(btnRow2);
+        }else if(ui.listingDraft&&!ui.sellFlow){
+            var ld=h("div",{class:"ep fc g10",style:{borderColor:"rgba(96,165,250,0.3)"}});
+            ld.append(h("span",{class:"lbl",style:{color:"#60a5fa"}},"Listing Draft"));
+            var ldTa=h("textarea",{rows:"16",style:{fontSize:"12px",lineHeight:"1.6",whiteSpace:"pre-wrap"},onInput:function(e){ui.listingDraft=e.target.value}});ldTa.value=ui.listingDraft;ld.append(ldTa);
+            var ldBtns=h("div",{class:"f g8"});
+            ldBtns.append(h("button",{class:"bp",style:{flex:1},onClick:function(){navigator.clipboard.writeText(ui.listingDraft).then(function(){flash("Listing copied!")}).catch(function(){});}},"Copy"));
+            ldBtns.append(h("button",{class:"bs",style:{color:"#60a5fa",borderColor:"rgba(96,165,250,0.3)"},onClick:function(){ui.listingDraft=generateListing(bike);R()}},"Regenerate"));
+            ldBtns.append(h("button",{class:"bs",onClick:function(){ui.listingDraft=null;R()}},"Close"));
+            ld.append(ldBtns);root.append(ld);
+        }else if(ui.sellFlow){var sf=h("div",{class:"ep fc g12",style:{borderColor:"rgba(34,197,94,0.3)"}});sf.append(h("span",{class:"lbl",style:{color:"#22c55e"}},"Complete Sale"));var sp=h("input",{type:"text",value:ui.sellPrice,placeholder:"Final sell price",style:{borderColor:"rgba(34,197,94,0.3)"},onInput:function(e){ui.sellPrice=e.target.value}});var sd=h("input",{type:"date",value:ui.sellDate,onInput:function(e){ui.sellDate=e.target.value}});sf.append(sp,sd);
             sf.append(h("div",{class:"f g8"},h("button",{class:"bs",style:{flex:1,justifyContent:"center"},onClick:function(){ui.sellFlow=0;R()}},"Cancel"),h("button",{class:"bp",style:{flex:1,background:"#22c55e"},onClick:function(){if(!ui.sellPrice.trim()){flash("Need sell price");return}var sold=JSON.parse(JSON.stringify(bike));sold.soldPrice=ui.sellPrice.trim();sold.soldDate=ui.sellDate||today();sold.partsCost=partsTrackerCost;sold.expCost=expCost;sold.totalIn=totalIn;sold.daysOwned=daysBetween(bike.buyDate,ui.sellDate||today());sold.profit=$$(parseFloat(ui.sellPrice.replace(/[^0-9.]/g,""))-allIn);data.sold.push(sold);data.bikes=data.bikes.filter(function(b){return b.id!==bike.id});logAct("bike-sold",bike.name+" for $"+ui.sellPrice.trim(),"bike",bike.id);save();nav("home");flash("Sold! Profit: $"+$$(sold.profit))}},"Confirm Sale")));root.append(sf)}
         if(ui.cfDel===bike.id)root.append(confirm_("Delete this bike and all data?",function(){data.bikes=data.bikes.filter(function(b){return b.id!==bike.id});save();nav("home")},function(){ui.cfDel=null;R()}));
         else root.append(h("button",{class:"bd",style:{marginTop:"12px"},onClick:function(){ui.cfDel=bike.id;R()}},"Delete bike"));
@@ -1446,7 +1532,7 @@
                 if(s==="delivered")job.deliveredAt=Date.now();
                 if(s!=="done"&&s!=="delivered"){job.completedAt=null;job.deliveredAt=null}
                 if(s!=="in-progress"&&s!=="waiting"&&job.timerStart){job.laborSeconds=getJobSecs(job);job.timerStart=null}
-                logAct("job-status","→ "+s,"job",job.id);
+                logAct("job-status","Status → "+s,"job",job.id);
                 save();if(job.shareToken)pushJobPublic(job);R();flash(s)}},s.replace("-"," "));statusBar.append(b)});
         root.append(statusBar);
 
@@ -1598,7 +1684,7 @@
         if(job.createdAt)ts.append(h("span",null,"Created "+new Date(job.createdAt).toLocaleDateString()));
         if(job.completedAt)ts.append(h("span",null,"Done "+new Date(job.completedAt).toLocaleDateString()));
         if(job.deliveredAt)ts.append(h("span",null,"Delivered "+new Date(job.deliveredAt).toLocaleDateString()));
-        if(job.createdAt){var age=daysBetween(new Date(job.createdAt).toISOString().split("T")[0],today());ts.append(h("span",null,age+"d in shop"))}
+        if(job.createdAt){var age=daysBetween(localDateStr(new Date(job.createdAt)),today());ts.append(h("span",null,age+"d in shop"))}
         root.append(ts);
 
         // Delete
@@ -1756,12 +1842,12 @@
                 // Build day counts for last 112 days (16 weeks)
                 var dayCounts={};var maxCount=0;
                 (data.activity||[]).forEach(function(a){
-                    var d=new Date(a.ts).toISOString().split("T")[0];
+                    var d=localDateStr(new Date(a.ts));
                     dayCounts[d]=(dayCounts[d]||0)+1;
                     if(dayCounts[d]>maxCount)maxCount=dayCounts[d];
                 });
                 // Build grid: 7 rows (Sun-Sat) x 16 cols
-                var now=new Date();var todayStr=now.toISOString().split("T")[0];
+                var now=new Date();var todayStr=localDateStr(now);
                 var dayLabels=["S","M","T","W","T","F","S"];
                 var grid=h("div",{style:{display:"flex",gap:"3px",overflowX:"auto",padding:"4px 0"}});
                 // Day labels column
@@ -1774,7 +1860,7 @@
                     var col=h("div",{style:{display:"flex",flexDirection:"column",gap:"3px"}});
                     for(var d=0;d<7;d++){
                         var cellDate=new Date(startDay);cellDate.setDate(cellDate.getDate()+w*7+d);
-                        var ds=cellDate.toISOString().split("T")[0];
+                        var ds=localDateStr(cellDate);
                         var count=dayCounts[ds]||0;
                         var intensity=maxCount>0?count/maxCount:0;
                         var bg=count===0?"rgba(255,255,255,0.03)":intensity<0.25?"rgba(245,158,11,0.15)":intensity<0.5?"rgba(245,158,11,0.3)":intensity<0.75?"rgba(245,158,11,0.5)":"rgba(245,158,11,0.75)";
@@ -1796,7 +1882,7 @@
                 actW.append(leg);
 
                 // Today's feed
-                var todayActs=(data.activity||[]).filter(function(a){return a.action!=="timer-start"&&new Date(a.ts).toISOString().split("T")[0]===todayStr}).sort(function(a,b){return b.ts-a.ts});
+                var todayActs=(data.activity||[]).filter(function(a){return a.action!=="timer-start"&&localDateStr(new Date(a.ts))===todayStr}).sort(function(a,b){return b.ts-a.ts});
                 if(todayActs.length>0){
                     var dayFeed=h("div",{class:"fc g2",style:{marginTop:"6px"}});
                     dayFeed.append(h("span",{style:{color:"#f59e0b",fontSize:"9px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"Today · "+todayActs.length+" actions"));
@@ -1851,7 +1937,7 @@
                 sumHdr.append(sumBadges);sumSec.append(sumHdr);
                 if(weekOpen){
                     // Session list grouped by day
-                    var sessByDay={};weekSessions.forEach(function(se){var d=new Date(se.start).toISOString().split("T")[0];if(!sessByDay[d])sessByDay[d]=[];sessByDay[d].push(se)});
+                    var sessByDay={};weekSessions.forEach(function(se){var d=localDateStr(new Date(se.start));if(!sessByDay[d])sessByDay[d]=[];sessByDay[d].push(se)});
                     var dayKeys=Object.keys(sessByDay).sort(function(a,b){return b<a?-1:1});
                     var sFeed=h("div",{class:"fc g2",style:{marginTop:"8px",maxHeight:"300px",overflowY:"auto"}});
                     dayKeys.forEach(function(day){
@@ -1865,7 +1951,7 @@
                             var row=h("div",{class:"f ac g8",style:{padding:"3px 0",fontSize:"11px",cursor:se.entityId?"pointer":"default"},onClick:function(){if(se.entityId)nav(se.entityType,se.entityId)}});
                             row.append(h("span",{style:{color:"#60a5fa",fontSize:"10px",fontVariantNumeric:"tabular-nums",flexShrink:0,fontWeight:600}},fmtMins(se.mins)));
                             row.append(h("span",{style:{color:"#e5e5e5",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},se.name));
-                            row.append(h("span",{style:{color:"#444",fontSize:"10px"}},se.count+" actions"));
+                            row.append(h("span",{style:{color:"#444",fontSize:"10px"}},se.count+(se.count===1?" action":" actions")));
                             row.append(h("span",{style:{color:"#444",fontSize:"10px"}},time));
                             sFeed.append(row)});
                     });
@@ -2281,15 +2367,15 @@
 
             // Heatmap
             var dayCounts={};var maxCount=0;
-            acts.forEach(function(a){var d=new Date(a.ts).toISOString().split("T")[0];dayCounts[d]=(dayCounts[d]||0)+1;if(dayCounts[d]>maxCount)maxCount=dayCounts[d]});
-            var now=new Date();var todayStr_=now.toISOString().split("T")[0];
+            acts.forEach(function(a){var d=localDateStr(new Date(a.ts));dayCounts[d]=(dayCounts[d]||0)+1;if(dayCounts[d]>maxCount)maxCount=dayCounts[d]});
+            var now=new Date();var todayStr_=localDateStr(now);
             var grid=h("div",{style:{display:"flex",gap:"3px",overflowX:"auto",padding:"4px 0"}});
             var lblCol=h("div",{style:{display:"flex",flexDirection:"column",gap:"3px",marginRight:"2px"}});
             ["S","M","T","W","T","F","S"].forEach(function(d,i){lblCol.append(h("div",{style:{width:"10px",height:"10px",fontSize:"7px",color:"#444",display:"flex",alignItems:"center",justifyContent:"center"}},i%2===1?d:""))});
             grid.append(lblCol);
             var startDay=new Date(now);startDay.setDate(startDay.getDate()-167-startDay.getDay());
             for(var w2=0;w2<24;w2++){var col=h("div",{style:{display:"flex",flexDirection:"column",gap:"3px"}});
-                for(var d2=0;d2<7;d2++){var cellDate=new Date(startDay);cellDate.setDate(cellDate.getDate()+w2*7+d2);var ds=cellDate.toISOString().split("T")[0];var count=dayCounts[ds]||0;var intensity=maxCount>0?count/maxCount:0;var bg=count===0?"rgba(255,255,255,0.03)":intensity<0.25?"rgba(245,158,11,0.15)":intensity<0.5?"rgba(245,158,11,0.3)":intensity<0.75?"rgba(245,158,11,0.5)":"rgba(245,158,11,0.75)";
+                for(var d2=0;d2<7;d2++){var cellDate=new Date(startDay);cellDate.setDate(cellDate.getDate()+w2*7+d2);var ds=localDateStr(cellDate);var count=dayCounts[ds]||0;var intensity=maxCount>0?count/maxCount:0;var bg=count===0?"rgba(255,255,255,0.03)":intensity<0.25?"rgba(245,158,11,0.15)":intensity<0.5?"rgba(245,158,11,0.3)":intensity<0.75?"rgba(245,158,11,0.5)":"rgba(245,158,11,0.75)";
                     col.append(h("div",{title:ds+": "+count+" actions",style:{width:"10px",height:"10px",borderRadius:"2px",background:bg,border:ds===todayStr_?"1px solid #f59e0b":"none"}}))}
                 grid.append(col)}
             aw.append(grid);
@@ -2330,7 +2416,7 @@
 
             // Full log grouped by day
             var filtered=actFilter==="all"?acts:actFilter==="note-add"?acts.filter(function(a){return a.action==="note-add"||a.action==="note-append"}):actFilter==="part-add"?acts.filter(function(a){return a.action==="part-add"||a.action==="part-status"}):acts.filter(function(a){return a.action===actFilter});
-            var byDay={};filtered.sort(function(a,b){return b.ts-a.ts}).forEach(function(a){var d=new Date(a.ts).toISOString().split("T")[0];if(!byDay[d])byDay[d]=[];byDay[d].push(a)});
+            var byDay={};filtered.sort(function(a,b){return b.ts-a.ts}).forEach(function(a){var d=localDateStr(new Date(a.ts));if(!byDay[d])byDay[d]=[];byDay[d].push(a)});
             var dayKeys=Object.keys(byDay).sort(function(a,b){return b<a?-1:1});
             var logW=h("div",{class:"fc g2"});
             dayKeys.forEach(function(day){
