@@ -630,7 +630,8 @@ function rBackup(){
   return bar;
 }
 
-// ============ TASKS =========// ============ LOG ============
+// ============ TASKS ============
+// ============ LOG ============
 var LOG_TYPES={wrench:{icon:"\u{1F527}",label:"Wrench",color:"#f59e0b",weight:15},ride:{icon:"\u{1F3CD}",label:"Ride",color:"#a855f7",weight:20},received:{icon:"\u{1F4E6}",label:"Received",color:"#22c55e",weight:2},note:{icon:"\u{1F4DD}",label:"Note",color:"#888",weight:10}};
 var ACT_WEIGHTS={"task-done":15,"task-undone":1,"job-status":1,"timer-stop":0,"expense-add":1,"part-add":2,"part-status":1,"note-add":10,"note-append":5,"log-wrench":15,"log-ride":20,"log-received":2,"chat-send":1,"job-created":2,"bike-add":2};
 function calcSessions(acts,gapMin){
@@ -3132,7 +3133,70 @@ function _tfRenderCompleted(){
 
   // Download location note for receiver
   if(!isSend){
-    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px"var _rPending=false;
+    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px",color:"#f59e0b",lineHeight:1.4}},"Files saved to your Downloads folder. On iOS, check Files → Downloads or your Photos library."));
+  }
+
+  return w;
+}
+
+// --- Progress UI ---
+function _tfRenderProgress(){
+  var isSend=!!_tfSending;
+  var w=h("div",{class:"fc g10",style:{padding:"16px",background:"rgba(255,255,255,0.03)",border:"1px solid #222",borderRadius:"12px"}});
+
+  var peerName=_tfPeerDeviceId&&_tfPeers[_tfPeerDeviceId]?_tfPeers[_tfPeerDeviceId].device_name:"Unknown";
+  w.append(h("span",{style:{color:"#f59e0b",fontSize:"12px",fontWeight:700}},(isSend?"Sending to ":"Receiving from ")+peerName));
+
+  if(_tfSending==="waiting"){
+    w.append(h("div",{class:"f ac g8"},h("span",{class:"spin"}),h("span",{style:{color:"#888",fontSize:"12px"}},"Waiting for response...")));
+  }else{
+    var state=isSend?_tfSendState:_tfRecvState;
+    var files=isSend?_tfSendQueue:(state.manifest||[]);
+    var totalBytes=state.totalBytes||1;
+    var doneBytes=isSend?state.bytesSent:state.bytesReceived;
+    var overallPct=Math.round((doneBytes/totalBytes)*100);
+
+    // Per-file progress
+    files.forEach(function(f,i){
+      var fileTotal=Math.ceil(f.size/CHUNK_SIZE);
+      var fileDone=0;
+      if(isSend){
+        if(i<state.fileIndex)fileDone=fileTotal;
+        else if(i===state.fileIndex)fileDone=state.chunkIndex;
+      }else{
+        if(state.files&&state.files.length>i)fileDone=fileTotal;
+        else if(state.chunks&&state.chunks[i])fileDone=state.chunks[i].filter(Boolean).length;
+      }
+      var filePct=fileTotal>0?Math.round((fileDone/fileTotal)*100):0;
+      var fRow=h("div",{class:"fc g2"});
+      var fInfo=h("div",{class:"f ac jb",style:{fontSize:"11px"}});
+      fInfo.append(h("span",{style:{color:"#ccc"}},f.name));
+      fInfo.append(h("span",{style:{color:"#888"}},filePct+"%  "+fmtBytes(fileDone*CHUNK_SIZE)+"/"+fmtBytes(f.size)));
+      fRow.append(fInfo);
+      // Segmented progress bar
+      var barBg=h("div",{style:{height:"6px",background:"rgba(255,255,255,0.05)",borderRadius:"3px",overflow:"hidden"}});
+      barBg.append(h("div",{style:{height:"100%",width:filePct+"%",background:"#f59e0b",borderRadius:"3px",transition:"width 0.2s"}}));
+      fRow.append(barBg);
+      w.append(fRow);
+    });
+
+    // Overall
+    var oRow=h("div",{class:"fc g2",style:{marginTop:"4px",paddingTop:"8px",borderTop:"1px solid #1a1a1a"}});
+    var oInfo=h("div",{class:"f ac jb",style:{fontSize:"12px",fontWeight:600}});
+    oInfo.append(h("span",{style:{color:"#f59e0b"}},"Overall"));
+    oInfo.append(h("span",{style:{color:"#f59e0b"}},overallPct+"%  "+fmtBytes(doneBytes)+"/"+fmtBytes(totalBytes)));
+    oRow.append(oInfo);
+    var oBar=h("div",{style:{height:"8px",background:"rgba(255,255,255,0.05)",borderRadius:"4px",overflow:"hidden"}});
+    oBar.append(h("div",{style:{height:"100%",width:overallPct+"%",background:"#f59e0b",borderRadius:"4px",transition:"width 0.2s"}}));
+    oRow.append(oBar);
+    w.append(oRow);
+  }
+
+  w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#ef4444",borderColor:"rgba(239,68,68,0.3)",marginTop:"4px"},onClick:function(){tfCancelTransfer()}},"Cancel"));
+  return w;
+}
+
+var _rPending=false;
 function _inputFocused(){var el=document.activeElement;return el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT"||el.isContentEditable)}
 function R(force){
   if(!force&&_inputFocused()){_rPending=true;return}
@@ -3163,6 +3227,13 @@ if("serviceWorker" in navigator){
       reg.active.postMessage({type:"POLL_CONFIG",tokens:tokens,auth:auth?auth.access_token:"",lastChatCheck:Date.now(),intakeCount:_intakeItems.length});
     }
     if(reg.active)pushSWConfig();
-    reg.addEventListener("updatefound",function(){reg.installing.addEve</script>
+    reg.addEventListener("updatefound",function(){reg.installing.addEventListener("statechange",function(){if(this.state==="activated")pushSWConfig()})});
+    // Update SW config periodically
+    setInterval(pushSWConfig,60000);
+    // Register periodic sync if available
+    if("periodicSync" in reg){reg.periodicSync.register("drydock-poll",{minInterval:5*60*1000}).catch(function(){})}
+  }).catch(function(e){console.log("SW registration failed:",e)});
+}
+</script>
 </body>
 </html>
