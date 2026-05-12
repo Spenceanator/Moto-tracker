@@ -1,4 +1,4 @@
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.3.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.4.0";
 // ============ ENTITY-LEVEL CHANGE TRACKING ============
 var _lastSnap={},_snapCols=['bikes','leads','sold','expenses','trips','jobs','customers'];
 function _snapKey(e){return JSON.stringify(e,function(k,v){return k==="_ts"?undefined:v})}

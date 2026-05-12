@@ -37,6 +37,10 @@ function renderNav(){
     nav.appendChild(el);
   });
   nav.appendChild(tfBtn);
+  var bosBtn=document.createElement("button");bosBtn.textContent="Bill of Sale";
+  bosBtn.style.cssText="color:"+(cv==="billsale"?"#f59e0b":"#666")+";font-size:13px;background:none;border:none;cursor:pointer;padding:8px 12px;border-radius:6px;font-family:var(--font);transition:color .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent";
+  bosBtn.onclick=function(){cv="billsale";selBike=null;selLead=null;selJob=null;selClient=null;R()};
+  nav.appendChild(bosBtn);
   if(a){
     var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out);
   }

@@ -4,7 +4,7 @@ function R(force){
   if(!force&&_inputFocused()){_rPending=true;return}
   _rPending=false;
   var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
-  if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());else if(cv==="client")wrap.append(rClientView());else if(cv==="transfer")wrap.append(rTransferView());
+  if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());else if(cv==="client")wrap.append(rClientView());else if(cv==="transfer")wrap.append(rTransferView());else if(cv==="billsale")wrap.append(rBillOfSaleView());
   app.append(wrap);renderNotifBell()}
 document.addEventListener("focusout",function(){if(_rPending)setTimeout(function(){if(_rPending&&!_inputFocused())R()},50)});
 R();renderNav();syncPull(function(){R();startPoll();fetchIntake(function(){R()})});

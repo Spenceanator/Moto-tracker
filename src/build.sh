@@ -18,6 +18,7 @@ FILES=(
   views.js
   home.js
   transfer.js
+  billsale.js
   app.js
 )
 
