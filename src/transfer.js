@@ -40,7 +40,6 @@ function getDeviceType(){
 
 // --- Transfer State ---
 var _tfChannel=null;
-var _tfPresenceInterval=null;
 var _tfPeers={};// {device_id: {device_id, device_name, device_type, available, timestamp}}
 var _tfPC=null;// RTCPeerConnection
 var _tfDC=null;// DataChannel
@@ -109,6 +108,10 @@ function tfJoinChannel(){
           var p=msg.payload;
           if(p.to&&p.to!==deviceId)return;
           _tfHandleBroadcast(p);
+        }else if(msg.event==="system"&&msg.payload&&msg.payload.status==="error"){
+          console.error("[TF] Channel error:",msg.payload.message);
+        }else if(msg.event==="phx_close"){
+          console.warn("[TF] Channel closed by server, will reconnect");
         }
       }
     }catch(e){console.error("WS message error:",e)}
@@ -125,14 +128,6 @@ function tfJoinChannel(){
   ws.onerror=function(e){console.error("WS error:",e)};
 
   _tfChannel={ws:ws,topic:channelTopic,deviceId:deviceId,deviceName:deviceName};
-
-  // Periodic presence re-track so both devices discover each other
-  // even if the initial presence_diff is missed
-  if(_tfPresenceInterval)clearInterval(_tfPresenceInterval);
-  _tfPresenceInterval=setInterval(function(){
-    if(!_tfChannel||!_tfChannel.ws||_tfChannel.ws.readyState!==1)return;
-    _tfPresenceTrack(_tfChannel.ws,_tfChannel.topic,getDeviceId(),getDeviceName(),getDeviceType());
-  },5000);
 }
 
 function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
@@ -195,7 +190,6 @@ function _tfHandlePresenceDiff(diff){
 }
 
 function tfLeaveChannel(){
-  if(_tfPresenceInterval){clearInterval(_tfPresenceInterval);_tfPresenceInterval=null}
   if(_tfChannel&&_tfChannel.ws){
     try{_tfChannel.ws.close()}catch(e){}
   }
