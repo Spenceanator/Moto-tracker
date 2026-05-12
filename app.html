@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Drydock">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="manifest" href="manifest.json">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <title>Drydock</title>
 <style>
   :root {
@@ -2819,20 +2820,33 @@ function _tfHandleTransferDone(){
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
-  // Download received files — stagger to avoid browser throttling
+  // Package received files into a timestamped zip
   var dlFiles=_tfRecvState.files.slice();
-  function _dlNext(i){
-    if(i>=dlFiles.length)return;
-    var f=dlFiles[i];
-    var url=URL.createObjectURL(f.blob);
-    var a=document.createElement("a");
-    a.href=url;a.download=f.name;
-    document.body.appendChild(a);a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(url)},10000);
-    setTimeout(function(){_dlNext(i+1)},300);
+  if(typeof JSZip!=="undefined"&&dlFiles.length>1){
+    var zip=new JSZip();
+    dlFiles.forEach(function(f){zip.file(f.name,f.blob)});
+    var now=new Date();
+    var ts=now.getFullYear()+"-"+("0"+(now.getMonth()+1)).slice(-2)+"-"+("0"+now.getDate()).slice(-2)+"_"+("0"+now.getHours()).slice(-2)+("0"+now.getMinutes()).slice(-2)+("0"+now.getSeconds()).slice(-2);
+    var zipName="drydock-transfer-"+ts+".zip";
+    zip.generateAsync({type:"blob"}).then(function(blob){
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement("a");
+      a.href=url;a.download=zipName;
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){URL.revokeObjectURL(url)},10000);
+    });
+  }else{
+    // Single file or no JSZip — download directly
+    dlFiles.forEach(function(f){
+      var url=URL.createObjectURL(f.blob);
+      var a=document.createElement("a");
+      a.href=url;a.download=f.name;
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){URL.revokeObjectURL(url)},10000);
+    });
   }
-  _dlNext(0);
 
   // Show completion card instead of immediately cleaning up
   _tfCompleted={direction:"receive",files:receivedFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfRecvState.totalBytes};
@@ -3115,7 +3129,9 @@ function _tfRenderCompleted(){
 
   // Download location note for receiver
   if(!isSend){
-    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px",color:"#f59e0b",lineHeight:1.4}},"Files saved to your Downloads folder. On iOS, check Files → Downloads or your Photos library."));
+    var dlNote=c.files.length>1?"Saved as a zip file in your Downloads folder.":"Saved to your Downloads folder.";
+    dlNote+=" On iOS, check Files → Downloads.";
+    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px",color:"#f59e0b",lineHeight:1.4}},dlNote));
   }
 
   return w;
