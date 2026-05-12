@@ -2410,6 +2410,7 @@ var _tfPeerDeviceId=null;
 var _tfReconnectAttempt=0;
 var _tfWakeLock=null;
 var _tfIncomingReq=null;// pending transfer request from peer
+var _tfSendManifest=null;// full file manifest, sent over DataChannel after connect
 var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName, files}]
 try{_tfHistory=JSON.parse(localStorage.getItem("drydock_transfer_history"))||[]}catch(e){}
 var _tfCompleted=null;// {direction, files:[{name,size}], peerName, ts} — shown until dismissed
@@ -2539,15 +2540,20 @@ function tfRequestTransfer(peerDeviceId,files){
   var manifest=files.map(function(f){return{name:f.name,size:f.size,type:f.type}});
   var totalBytes=files.reduce(function(s,f){return s+f.size},0);
   _tfSendQueue=files.map(function(f){return{file:f,name:f.name,size:f.size,type:f.type}});
+  _tfSendManifest=manifest;// full manifest sent over DataChannel after connect
   _tfPeerDeviceId=peerDeviceId;
   _tfSendState={fileIndex:0,chunkIndex:0,totalChunks:0,bytesSent:0,totalBytes:totalBytes,retries:0,ackTimer:null};
 
+  // Send lightweight request — just count and size, not full file list
+  // Full manifest sent over DataChannel after connection
   tfBroadcast("transfer-req",{
     to:peerDeviceId,
-    files:manifest,
-    totalBytes:totalBytes
+    fileCount:files.length,
+    totalBytes:totalBytes,
+    // Include first few file names as preview
+    preview:manifest.slice(0,5).map(function(f){return f.name})
   });
-  _tfSending="waiting";// waiting for ack
+  _tfSending="waiting";
   if(cv==="transfer")R();
 }
 
@@ -2555,18 +2561,19 @@ function _tfHandleTransferReq(payload){
   _tfIncomingReq={
     from:payload.from,
     fromName:payload.fromName||"Unknown Device",
-    files:payload.files||[],
-    totalBytes:payload.totalBytes||0
+    fileCount:payload.fileCount||0,
+    totalBytes:payload.totalBytes||0,
+    preview:payload.preview||[]
   };
-  if(cv==="transfer")R();
-  // Play notification sound
+  if(cv==="transfer")R(true);
   pingSound();
 }
 
 function tfAcceptTransfer(){
   if(!_tfIncomingReq)return;
   _tfPeerDeviceId=_tfIncomingReq.from;
-  _tfRecvState={fileIndex:0,chunkIndex:0,chunks:[],files:[],manifest:_tfIncomingReq.files,bytesReceived:0,totalBytes:_tfIncomingReq.totalBytes,lastMeta:null};
+  // Manifest comes over DataChannel after connection — initialize with what we know
+  _tfRecvState={fileIndex:0,chunkIndex:0,chunks:[],files:[],manifest:null,bytesReceived:0,totalBytes:_tfIncomingReq.totalBytes,lastMeta:null,fileCount:_tfIncomingReq.fileCount};
   _tfReceiving=true;
   tfBroadcast("transfer-ack",{to:_tfIncomingReq.from});
   _tfIncomingReq=null;
@@ -2637,14 +2644,23 @@ function _tfSetupDataChannel(dc){
   dc.binaryType="arraybuffer";
   dc.onopen=function(){
     if(_tfSending===true){
-      // Start sending files
+      // Send full manifest over DataChannel first, then start chunks
+      if(_tfSendManifest){
+        dc.send(JSON.stringify({type:"manifest",files:_tfSendManifest}));
+        _tfSendManifest=null;
+      }
       _tfSendNextChunk();
     }
   };
   dc.onmessage=function(evt){
     if(typeof evt.data==="string"){
       var msg=JSON.parse(evt.data);
-      if(msg.type==="meta"){
+      if(msg.type==="manifest"){
+        // Full file list from sender — now we know what's coming
+        _tfRecvState.manifest=msg.files;
+        _tfRecvState.fileCount=msg.files.length;
+        if(cv==="transfer")R(true);
+      }else if(msg.type==="meta"){
         _tfRecvState.lastMeta=msg;
       }else if(msg.type==="ack"){
         _tfHandleAck(msg);
@@ -2652,7 +2668,6 @@ function _tfSetupDataChannel(dc){
         _tfHandleTransferDone();
       }
     }else{
-      // ArrayBuffer - chunk data
       _tfHandleChunkData(evt.data);
     }
   };
@@ -2844,7 +2859,7 @@ function _tfFinishSend(status){
 function _tfCleanup(){
   if(_tfPC){try{_tfPC.close()}catch(e){}}
   _tfPC=null;_tfDC=null;
-  _tfSendQueue=[];
+  _tfSendQueue=[];_tfSendManifest=null;
   _tfSendState={fileIndex:0,chunkIndex:0,totalChunks:0,bytesSent:0,totalBytes:0,retries:0,ackTimer:null};
   _tfRecvState={fileIndex:0,chunkIndex:0,chunks:[],files:[],manifest:null,bytesReceived:0,totalBytes:0,lastMeta:null};
   _tfPeerDeviceId=null;
@@ -3046,14 +3061,20 @@ function _tfRenderIncomingModal(){
   var modal=h("div",{style:{padding:"20px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:"12px"}});
   var title=h("div",{class:"fc g4",style:{marginBottom:"12px"}});
   title.append(h("span",{style:{color:"#f59e0b",fontSize:"14px",fontWeight:700}},req.fromName+" wants to send"));
-  title.append(h("span",{style:{color:"#888",fontSize:"12px"}},req.files.length+" file"+(req.files.length!==1?"s":"")+" ("+fmtBytes(req.totalBytes)+")"));
+  title.append(h("span",{style:{color:"#888",fontSize:"12px"}},req.fileCount+" file"+(req.fileCount!==1?"s":"")+" ("+fmtBytes(req.totalBytes)+")"));
   modal.append(title);
 
-  var fileList=h("div",{class:"fc g2",style:{marginBottom:"12px",maxHeight:"150px",overflowY:"auto"}});
-  req.files.forEach(function(f){
-    fileList.append(h("div",{class:"f ac jb",style:{padding:"4px 0",fontSize:"11px"}},h("span",{style:{color:"#ccc"}},f.name),h("span",{style:{color:"#555"}},fmtBytes(f.size))));
-  });
-  modal.append(fileList);
+  // Show preview of first few file names
+  if(req.preview&&req.preview.length>0){
+    var fileList=h("div",{class:"fc g2",style:{marginBottom:"12px"}});
+    req.preview.forEach(function(name){
+      fileList.append(h("div",{style:{padding:"2px 0",fontSize:"11px",color:"#ccc"}},name));
+    });
+    if(req.fileCount>req.preview.length){
+      fileList.append(h("div",{style:{padding:"2px 0",fontSize:"11px",color:"#555"}},"... and "+(req.fileCount-req.preview.length)+" more"));
+    }
+    modal.append(fileList);
+  }
 
   var btns=h("div",{class:"f g8"});
   btns.append(h("button",{class:"bs",style:{flex:1,justifyContent:"center",color:"#ef4444",borderColor:"rgba(239,68,68,0.3)"},onClick:function(){tfRejectTransfer()}},"Reject"));
