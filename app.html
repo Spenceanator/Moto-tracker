@@ -146,9 +146,9 @@ function _dbgCreate(){
   var tb=document.createElement("div");
   tb.style.cssText="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#111;border-bottom:1px solid #222;flex-shrink:0";
   // Filter buttons
-  ["all","error","warn","tf"].forEach(function(f){
+  ["all","error","warn","tf","sync"].forEach(function(f){
     var btn=document.createElement("button");
-    btn.textContent=f==="tf"?"[TF]":f.toUpperCase();
+    btn.textContent=f==="tf"?"[TF]":f==="sync"?"[SYNC]":f.toUpperCase();
     btn.style.cssText="padding:2px 8px;border-radius:4px;font-size:9px;font-weight:600;font-family:inherit;cursor:pointer;border:1px solid "+(_dbgFilter===f?"#f59e0b":"#333")+";background:"+(_dbgFilter===f?"rgba(245,158,11,0.15)":"transparent")+";color:"+(_dbgFilter===f?"#f59e0b":"#666");
     btn.onclick=function(){_dbgFilter=f;_dbgRender()};
     tb.appendChild(btn);
@@ -190,6 +190,7 @@ function _dbgCreate(){
 function _dbgFiltered(){
   if(_dbgFilter==="all")return _dbgLogs;
   if(_dbgFilter==="tf")return _dbgLogs.filter(function(l){return l.text.indexOf("[TF]")>-1});
+  if(_dbgFilter==="sync")return _dbgLogs.filter(function(l){return l.text.indexOf("[SYNC]")>-1});
   return _dbgLogs.filter(function(l){return l.level===_dbgFilter});
 }
 
@@ -214,7 +215,7 @@ function _dbgRender(){
   // Update filter button styles
   if(_dbgEl){
     var btns=_dbgEl.querySelectorAll("button");
-    ["all","error","warn","tf"].forEach(function(f,i){
+    ["all","error","warn","tf","sync"].forEach(function(f,i){
       if(btns[i]){
         btns[i].style.borderColor=_dbgFilter===f?"#f59e0b":"#333";
         btns[i].style.background=_dbgFilter===f?"rgba(245,158,11,0.15)":"transparent";
@@ -266,7 +267,11 @@ function renderNav(){
     var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out);
   }
 }
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.2.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.3.0";
+// ============ ENTITY-LEVEL CHANGE TRACKING ============
+var _lastSnap={},_snapCols=['bikes','leads','sold','expenses','trips','jobs','customers'];
+function _snapKey(e){return JSON.stringify(e,function(k,v){return k==="_ts"?undefined:v})}
+function _updateSnapshot(){_lastSnap={};_snapCols.forEach(function(c){_lastSnap[c]={};(data[c]||[]).forEach(function(e){if(e.id)_lastSnap[c][e.id]=_snapKey(e)})})}
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -356,9 +361,14 @@ function migrate(d){
     l.hiddenIssues.forEach(function(i){if(i.cost!=null&&typeof i.cost!=="string")i.cost=String(i.cost)})});
   if(d.bikes)d.bikes=d.bikes.map(function(b){if(!b.checklistTemplates)b.checklistTemplates=JSON.parse(JSON.stringify(d.checklistTemplates));if(!b.tasks)b.tasks=[];
     b.tasks.forEach(function(t){if(t.cost==null)t.cost="";if(t.verified===undefined)t.verified=1});if(!b.specs)b.specs={};if(!b.buyDate)b.buyDate="";if(!b.actualBuyPrice)b.actualBuyPrice="";if(!b.source)b.source="";return b});
+  // Stamp _ts on entities that don't have one (migration from pre-6.3.0)
+  var blobTs=d._ts||Date.now();
+  ['bikes','leads','sold','expenses','trips','jobs','customers'].forEach(function(c){(d[c]||[]).forEach(function(e){if(e.id&&!e._ts)e._ts=blobTs})});
   return d}
 function load(){try{var r=localStorage.getItem(SK);if(!r)return fresh();return migrate(JSON.parse(r))}catch(e){return fresh()}}
-function save(){try{data._ts=Date.now();localStorage.setItem(SK,JSON.stringify(data));syncPush()}catch(e){}}
+function save(){try{var now=Date.now();data._ts=now;
+  _snapCols.forEach(function(c){if(!_lastSnap[c])_lastSnap[c]={};(data[c]||[]).forEach(function(e){if(!e.id)return;var sk=_snapKey(e);if(sk!==_lastSnap[c][e.id])e._ts=now;_lastSnap[c][e.id]=sk})});
+  localStorage.setItem(SK,JSON.stringify(data));syncPush()}catch(e){}}
 function logAct(action,detail,entityType,entityId){
   if(!data.activity)data.activity=[];
   // Auto-append entity name for context
@@ -520,38 +530,97 @@ document.addEventListener("click",function(){requestNotifPermission()},{once:tru
 // ============ SUPABASE SYNC ============
 var _syncTimer=null,_syncing=0,_lastPushTs=0,_pollInt=null,_localDirty=0;
 function syncPush(){_localDirty=1;if(_syncTimer)clearTimeout(_syncTimer);_syncTimer=setTimeout(function(){_doSync()},2000)}
+
+// ---- Entity-level merge ----
+function mergeData(local,remote){
+  var m=JSON.parse(JSON.stringify(local));
+  var cols=['bikes','leads','sold','expenses','trips','jobs','customers'];
+  var stats={kept:0,taken:0,merged:0};
+  cols.forEach(function(c){
+    var lm={},rm={},ids={};
+    (local[c]||[]).forEach(function(e){if(e.id){lm[e.id]=e;ids[e.id]=1}});
+    (remote[c]||[]).forEach(function(e){if(e.id){rm[e.id]=e;ids[e.id]=1}});
+    var result=[];
+    Object.keys(ids).forEach(function(id){
+      var l=lm[id],r=rm[id];
+      if(l&&!r){result.push(l);stats.kept++}
+      else if(r&&!l){result.push(r);stats.taken++}
+      else{result.push((r._ts||0)>(l._ts||0)?r:l);stats.merged++}
+    });
+    m[c]=result;
+  });
+  // Cross-collection dedup: if an ID is in sold[], remove from bikes[]
+  var soldIds={};m.sold.forEach(function(e){if(e.id)soldIds[e.id]=1});
+  m.bikes=m.bikes.filter(function(b){return!soldIds[b.id]});
+  // Activity: merge by union, dedupe by ts+action+id
+  var actMap={};
+  (local.activity||[]).forEach(function(a){actMap[a.ts+"|"+a.action+"|"+(a.id||"")]=a});
+  (remote.activity||[]).forEach(function(a){var k=a.ts+"|"+a.action+"|"+(a.id||"");if(!actMap[k])actMap[k]=a});
+  m.activity=Object.keys(actMap).map(function(k){return actMap[k]}).sort(function(a,b){return a.ts-b.ts});
+  if(m.activity.length>2000)m.activity=m.activity.slice(-2000);
+  // Top-level fields
+  m._ts=Math.max(local._ts||0,remote._ts||0);
+  m.apiKey=local.apiKey||remote.apiKey;
+  m.leadPrompt=(local._ts||0)>=(remote._ts||0)?local.leadPrompt:remote.leadPrompt;
+  if(!m.leadPrompt)m.leadPrompt=local.leadPrompt||remote.leadPrompt||"";
+  // Checklist templates: keep from whichever blob is newer
+  if((remote._ts||0)>(local._ts||0)&&remote.checklistTemplates)m.checklistTemplates=remote.checklistTemplates;
+  // Vehicles list: merge by name
+  var vMap={};(local.vehicles||[]).forEach(function(v){vMap[v]=1});(remote.vehicles||[]).forEach(function(v){vMap[v]=1});
+  m.vehicles=Object.keys(vMap);
+  console.log("[SYNC] Merge complete — local-only:"+stats.kept+", remote-only:"+stats.taken+", both:"+stats.merged);
+  return m;
+}
+
 function _doSync(){
   if(_syncing||!getAuth())return;_syncing=1;
+  console.log("[SYNC] Push started");
   var url=SB_URL+"/rest/v1/sync?id=eq.main";
-  var now=new Date().toISOString();
-  var body=JSON.stringify({id:"main",data:JSON.parse(JSON.stringify(data)),updated_at:now});
-  fetch(url,{method:"GET",headers:sbHeaders()})
+  fetch(url+"&select=data,updated_at",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
-    var method=rows.length>0?"PATCH":"POST";
-    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/sync";
+    var method,postUrl,toSend;
+    if(rows.length>0&&rows[0].data){
+      method="PATCH";postUrl=url;
+      console.log("[SYNC] Remote exists, merging before push");
+      toSend=mergeData(data,rows[0].data);
+      data=migrate(toSend);
+      localStorage.setItem(SK,JSON.stringify(data));
+      _updateSnapshot();
+    }else{
+      method="POST";postUrl=SB_URL+"/rest/v1/sync";
+      toSend=JSON.parse(JSON.stringify(data));
+      console.log("[SYNC] No remote row, creating");
+    }
+    var now=new Date().toISOString();
+    var body=JSON.stringify({id:"main",data:toSend,updated_at:now});
     var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
     return fetch(postUrl,{method:method,headers:hdrs,body:body})
   }).then(function(r){
     _syncing=0;_localDirty=0;_lastPushTs=Date.now();
+    console.log("[SYNC] Push complete");
     var el=document.getElementById("sync-dot");if(el){el.style.background="#22c55e";el.title="Synced"}
     startPoll();
-  }).catch(function(e){_syncing=0;console.error("Sync push failed:",e);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"}})
+  }).catch(function(e){_syncing=0;console.error("[SYNC] Push failed:",e);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"}})
 }
 function syncPull(cb,force){
   if(!getAuth()){if(cb)cb();return}
+  console.log("[SYNC] Pull started, force="+!!force);
   fetch(SB_URL+"/rest/v1/sync?id=eq.main&select=data,updated_at",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data){
       var remote=rows[0].data;var remoteTs=remote._ts||0;var localTs=data._ts||0;
       if(force||remoteTs>localTs){
-        remote.apiKey=data.apiKey||remote.apiKey;
-        data=migrate(remote);_localDirty=0;_lastPushTs=Date.now();
+        console.log("[SYNC] Merging — local _ts:"+localTs+", remote _ts:"+remoteTs);
+        var merged=mergeData(data,remote);
+        merged.apiKey=data.apiKey||merged.apiKey;
+        data=migrate(merged);_localDirty=0;_lastPushTs=Date.now();
+        _updateSnapshot();
         localStorage.setItem(SK,JSON.stringify(data));
         flash("Synced from cloud");R()
-      }
+      }else{console.log("[SYNC] Pull skipped — local is newer")}
     }else if(force){flash("Nothing in cloud yet")}
     if(cb)cb()
-  }).catch(function(e){console.error("Sync pull failed:",e);flash("Sync pull failed");if(cb)cb()})
+  }).catch(function(e){console.error("[SYNC] Pull failed:",e);flash("Sync pull failed");if(cb)cb()})
 }
 function startPoll(){if(_pollInt)return;_pollInt=setInterval(pollCheck,15000)}
 function stopPoll(){if(_pollInt){clearInterval(_pollInt);_pollInt=null}}
@@ -736,7 +805,7 @@ timer:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="curre
 };
 function chev(o){return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate('+(o?90:0)+'deg);transition:transform .15s"><path d="M5 3l4 4-4 4"/></svg>'}
 
-var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";
+var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";_updateSnapshot();
 var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[],logEdit:null,activeTask:null,partExp:null,logType:"note",_recvParts:{}};
 var st=null;
 function ss(){if(st)clearTimeout(st);st=setTimeout(save,200)}
