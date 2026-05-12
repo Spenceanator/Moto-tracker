@@ -3685,11 +3685,13 @@ function rBillOfSaleView(){
   root.append(_bosSigSection());
 
   // ---- GENERATE BUTTON ----
-  var genBtn=h("button",{class:"bp",style:{width:"100%",marginTop:"8px",padding:"14px"},onclick:function(){_bosGeneratePDF()}},I.dlFile+" Generate PDF");
+  var genBtn=h("button",{class:"bp",style:{width:"100%",marginTop:"8px",padding:"14px"},onclick:function(){_bosGeneratePDF()}});
+  genBtn.innerHTML=I.dlFile+" Generate PDF";
   root.append(genBtn);
 
   // ---- RESET ----
-  var rstBtn=h("button",{class:"bs",style:{width:"100%",justifyContent:"center"},onclick:function(){_bosReset();R()}},I.trash+" Clear Form");
+  var rstBtn=h("button",{class:"bs",style:{width:"100%",justifyContent:"center"},onclick:function(){_bosReset();R()}});
+  rstBtn.innerHTML=I.trash+" Clear Form";
   root.append(rstBtn);
 
   return root;
@@ -3742,7 +3744,8 @@ function _bosDLSection(){
     var img=document.createElement("img");img.src=_bos.buyerDL;
     img.style.cssText="width:100%;max-height:200px;object-fit:contain;border-radius:6px;border:1px solid #333";
     card.append(img);
-    var rmBtn=h("button",{class:"bs",style:{justifyContent:"center"},onclick:function(){_bos.buyerDL=null;R()}},I.trash+" Remove");
+    var rmBtn=h("button",{class:"bs",style:{justifyContent:"center"},onclick:function(){_bos.buyerDL=null;R()}});
+    rmBtn.innerHTML=I.trash+" Remove";
     card.append(rmBtn);
   }else{
     var inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.capture="environment";
