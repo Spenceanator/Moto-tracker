@@ -598,7 +598,7 @@ var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,h
 var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[],logEdit:null,activeTask:null,partExp:null,logType:"note",_recvParts:{}};
 var st=null;
 function ss(){if(st)clearTimeout(st);st=setTimeout(save,200)}
-function nav(v,id){cv=v;selBike=v==="bike"?id:null;selLead=v==="lead"?id:null;selJob=v==="job"?id:null;selClient=v==="client"?id:null;ui=Object.assign({},ui,{addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,tExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,sellFlow:0,sellPrice:"",sellDate:"",scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]});R()}
+function nav(v,id){cv=v;selBike=v==="bike"?id:null;selLead=v==="lead"?id:null;selJob=v==="job"?id:null;selClient=v==="client"?id:null;ui=Object.assign({},ui,{addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,tExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,sellFlow:0,sellPrice:"",sellDate:"",scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[]});R(true)}
 
 function h(t,a){var c=Array.prototype.slice.call(arguments,2);var e=document.createElement(t);if(a)Object.entries(a).forEach(function(p){var k=p[0],v=p[1];if(k==="class")e.className=v;else if(k==="style"&&typeof v==="object")Object.assign(e.style,v);else if(k.startsWith("on"))e.addEventListener(k.slice(2).toLowerCase(),v);else if(k==="href"){e.setAttribute(k,v);e.setAttribute("target","_blank");e.setAttribute("rel","noopener")}else e.setAttribute(k,v)});c.flat(Infinity).forEach(function(x){if(x==null||x===false)return;e.appendChild(typeof x==="string"||typeof x==="number"?document.createTextNode(String(x)):x)});return e}
 function ic(n,s){var sp=document.createElement("span");sp.innerHTML=I[n]||"";sp.style.display="flex";sp.style.alignItems="center";if(s)Object.assign(sp.style,s);return sp}
@@ -628,8 +628,7 @@ function rBackup(){
   return bar;
 }
 
-// ============ TASKS ============
-// ============ LOG ============
+// ============ TASKS =========// ============ LOG ============
 var LOG_TYPES={wrench:{icon:"\u{1F527}",label:"Wrench",color:"#f59e0b",weight:15},ride:{icon:"\u{1F3CD}",label:"Ride",color:"#a855f7",weight:20},received:{icon:"\u{1F4E6}",label:"Received",color:"#22c55e",weight:2},note:{icon:"\u{1F4DD}",label:"Note",color:"#888",weight:10}};
 var ACT_WEIGHTS={"task-done":15,"task-undone":1,"job-status":1,"timer-stop":0,"expense-add":1,"part-add":2,"part-status":1,"note-add":10,"note-append":5,"log-wrench":15,"log-ride":20,"log-received":2,"chat-send":1,"job-created":2,"bike-add":2};
 function calcSessions(acts,gapMin){
@@ -2396,6 +2395,7 @@ function getDeviceType(){
 
 // --- Transfer State ---
 var _tfChannel=null;
+var _tfPresenceInterval=null;
 var _tfPeers={};// {device_id: {device_id, device_name, device_type, available, timestamp}}
 var _tfPC=null;// RTCPeerConnection
 var _tfDC=null;// DataChannel
@@ -2408,8 +2408,9 @@ var _tfPeerDeviceId=null;
 var _tfReconnectAttempt=0;
 var _tfWakeLock=null;
 var _tfIncomingReq=null;// pending transfer request from peer
-var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName}]
+var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName, files}]
 try{_tfHistory=JSON.parse(localStorage.getItem("drydock_transfer_history"))||[]}catch(e){}
+var _tfCompleted=null;// {direction, files:[{name,size}], peerName, ts} — shown until dismissed
 
 // --- Supabase Realtime Presence ---
 function tfJoinChannel(){
@@ -2479,6 +2480,14 @@ function tfJoinChannel(){
   ws.onerror=function(e){console.error("WS error:",e)};
 
   _tfChannel={ws:ws,topic:channelTopic,deviceId:deviceId,deviceName:deviceName};
+
+  // Periodic presence re-track so both devices discover each other
+  // even if the initial presence_diff is missed
+  if(_tfPresenceInterval)clearInterval(_tfPresenceInterval);
+  _tfPresenceInterval=setInterval(function(){
+    if(!_tfChannel||!_tfChannel.ws||_tfChannel.ws.readyState!==1)return;
+    _tfPresenceTrack(_tfChannel.ws,_tfChannel.topic,getDeviceId(),getDeviceName(),getDeviceType());
+  },5000);
 }
 
 function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
@@ -2511,7 +2520,7 @@ function _tfHandlePresenceState(state){
       _tfPeers[metas.device_id]=metas;
     }
   });
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function _tfHandlePresenceDiff(diff){
@@ -2535,10 +2544,11 @@ function _tfHandlePresenceDiff(diff){
       }else if(metas.device_id){delete _tfPeers[metas.device_id]}
     });
   }
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function tfLeaveChannel(){
+  if(_tfPresenceInterval){clearInterval(_tfPresenceInterval);_tfPresenceInterval=null}
   if(_tfChannel&&_tfChannel.ws){
     try{_tfChannel.ws.close()}catch(e){}
   }
@@ -2833,9 +2843,9 @@ function _tfHandleTransferDone(){
   releaseWakeLock();
   localStorage.removeItem("drydock_transfer_state");
 
-  // Trigger downloads or offer to attach
   var peerName=_tfPeers[_tfPeerDeviceId]?_tfPeers[_tfPeerDeviceId].device_name:"Unknown";
-  _tfHistory.unshift({ts:Date.now(),direction:"receive",fileCount:_tfRecvState.files.length,totalBytes:_tfRecvState.totalBytes,status:"completed",peerName:peerName});
+  var receivedFiles=_tfRecvState.files.map(function(f){return{name:f.name,size:f.size}});
+  _tfHistory.unshift({ts:Date.now(),direction:"receive",fileCount:receivedFiles.length,totalBytes:_tfRecvState.totalBytes,status:"completed",peerName:peerName,files:receivedFiles});
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
@@ -2846,12 +2856,14 @@ function _tfHandleTransferDone(){
     a.href=url;a.download=f.name;
     document.body.appendChild(a);a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(function(){URL.revokeObjectURL(url)},5000);
   });
 
-  flash(_tfRecvState.files.length+" file"+((_tfRecvState.files.length!==1)?"s":"")+" received");
+  // Show completion card instead of immediately cleaning up
+  _tfCompleted={direction:"receive",files:receivedFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfRecvState.totalBytes};
+  pingSound();
   _tfCleanup();
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function _tfFinishSend(status){
@@ -2860,13 +2872,18 @@ function _tfFinishSend(status){
   localStorage.removeItem("drydock_transfer_state");
 
   var peerName=_tfPeers[_tfPeerDeviceId]?_tfPeers[_tfPeerDeviceId].device_name:"Unknown";
-  _tfHistory.unshift({ts:Date.now(),direction:"send",fileCount:_tfSendQueue.length,totalBytes:_tfSendState.totalBytes,status:status,peerName:peerName});
+  var sentFiles=_tfSendQueue.map(function(f){return{name:f.name,size:f.size}});
+  _tfHistory.unshift({ts:Date.now(),direction:"send",fileCount:sentFiles.length,totalBytes:_tfSendState.totalBytes,status:status,peerName:peerName,files:sentFiles});
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
-  if(status==="completed")flash("Transfer complete");
+  // Show completion card
+  if(status==="completed"){
+    _tfCompleted={direction:"send",files:sentFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfSendState.totalBytes};
+    pingSound();
+  }
   _tfCleanup();
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function _tfCleanup(){
@@ -3002,6 +3019,11 @@ function rTransferView(){
     root.append(_tfRenderIncomingModal());
   }
 
+  // Completion card
+  if(_tfCompleted){
+    root.append(_tfRenderCompleted());
+  }
+
   // Active transfer progress
   if(_tfSending||_tfReceiving){
     root.append(_tfRenderProgress());
@@ -3085,66 +3107,42 @@ function _tfRenderIncomingModal(){
   return modal;
 }
 
-// --- Progress UI ---
-function _tfRenderProgress(){
-  var isSend=!!_tfSending;
-  var w=h("div",{class:"fc g10",style:{padding:"16px",background:"rgba(255,255,255,0.03)",border:"1px solid #222",borderRadius:"12px"}});
+// --- Completion Card ---
+function _tfRenderCompleted(){
+  var c=_tfCompleted;
+  var isSend=c.direction==="send";
+  var w=h("div",{style:{padding:"16px",background:isSend?"rgba(96,165,250,0.06)":"rgba(34,197,94,0.06)",border:"1px solid "+(isSend?"rgba(96,165,250,0.2)":"rgba(34,197,94,0.2)"),borderRadius:"12px"}});
 
-  var peerName=_tfPeerDeviceId&&_tfPeers[_tfPeerDeviceId]?_tfPeers[_tfPeerDeviceId].device_name:"Unknown";
-  w.append(h("span",{style:{color:"#f59e0b",fontSize:"12px",fontWeight:700}},(isSend?"Sending to ":"Receiving from ")+peerName));
+  var hdr=h("div",{class:"f ac g8",style:{marginBottom:"10px"}});
+  hdr.append(h("span",{style:{fontSize:"22px"}},isSend?"✓":"⬇"));
+  var title=h("div",{class:"fc",style:{flex:1}});
+  title.append(h("span",{style:{color:isSend?"#60a5fa":"#22c55e",fontSize:"14px",fontWeight:700}},isSend?"Transfer Complete":"Files Received"));
+  title.append(h("span",{style:{color:"#888",fontSize:"11px"}},(isSend?"Sent to ":"Received from ")+c.peerName+" · "+fmtBytes(c.totalBytes)));
+  hdr.append(title);
+  hdr.append(h("button",{style:{color:"#555",fontSize:"18px",background:"none",border:"none",cursor:"pointer",padding:"4px"},onClick:function(){_tfCompleted=null;R(true)}},"×"));
+  w.append(hdr);
 
-  if(_tfSending==="waiting"){
-    w.append(h("div",{class:"f ac g8"},h("span",{class:"spin"}),h("span",{style:{color:"#888",fontSize:"12px"}},"Waiting for response...")));
-  }else{
-    var state=isSend?_tfSendState:_tfRecvState;
-    var files=isSend?_tfSendQueue:(state.manifest||[]);
-    var totalBytes=state.totalBytes||1;
-    var doneBytes=isSend?state.bytesSent:state.bytesReceived;
-    var overallPct=Math.round((doneBytes/totalBytes)*100);
+  // File list
+  var list=h("div",{class:"fc g4"});
+  c.files.forEach(function(f){
+    var row=h("div",{class:"f ac jb",style:{padding:"4px 8px",background:"rgba(255,255,255,0.03)",borderRadius:"6px",fontSize:"11px"}});
+    row.append(h("span",{style:{color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},f.name));
+    row.append(h("span",{style:{color:"#555",flexShrink:0,marginLeft:"8px"}},fmtBytes(f.size)));
+    list.append(row);
+  });
+  w.append(list);
 
-    // Per-file progress
-    files.forEach(function(f,i){
-      var fileTotal=Math.ceil(f.size/CHUNK_SIZE);
-      var fileDone=0;
-      if(isSend){
-        if(i<state.fileIndex)fileDone=fileTotal;
-        else if(i===state.fileIndex)fileDone=state.chunkIndex;
-      }else{
-        if(state.files&&state.files.length>i)fileDone=fileTotal;
-        else if(state.chunks&&state.chunks[i])fileDone=state.chunks[i].filter(Boolean).length;
-      }
-      var filePct=fileTotal>0?Math.round((fileDone/fileTotal)*100):0;
-      var fRow=h("div",{class:"fc g2"});
-      var fInfo=h("div",{class:"f ac jb",style:{fontSize:"11px"}});
-      fInfo.append(h("span",{style:{color:"#ccc"}},f.name));
-      fInfo.append(h("span",{style:{color:"#888"}},filePct+"%  "+fmtBytes(fileDone*CHUNK_SIZE)+"/"+fmtBytes(f.size)));
-      fRow.append(fInfo);
-      // Segmented progress bar
-      var barBg=h("div",{style:{height:"6px",background:"rgba(255,255,255,0.05)",borderRadius:"3px",overflow:"hidden"}});
-      barBg.append(h("div",{style:{height:"100%",width:filePct+"%",background:"#f59e0b",borderRadius:"3px",transition:"width 0.2s"}}));
-      fRow.append(barBg);
-      w.append(fRow);
-    });
-
-    // Overall
-    var oRow=h("div",{class:"fc g2",style:{marginTop:"4px",paddingTop:"8px",borderTop:"1px solid #1a1a1a"}});
-    var oInfo=h("div",{class:"f ac jb",style:{fontSize:"12px",fontWeight:600}});
-    oInfo.append(h("span",{style:{color:"#f59e0b"}},"Overall"));
-    oInfo.append(h("span",{style:{color:"#f59e0b"}},overallPct+"%  "+fmtBytes(doneBytes)+"/"+fmtBytes(totalBytes)));
-    oRow.append(oInfo);
-    var oBar=h("div",{style:{height:"8px",background:"rgba(255,255,255,0.05)",borderRadius:"4px",overflow:"hidden"}});
-    oBar.append(h("div",{style:{height:"100%",width:overallPct+"%",background:"#f59e0b",borderRadius:"4px",transition:"width 0.2s"}}));
-    oRow.append(oBar);
-    w.append(oRow);
-  }
-
-  w.append(h("button",{class:"bs",style:{alignSelf:"flex-start",color:"#ef4444",borderColor:"rgba(239,68,68,0.3)",marginTop:"4px"},onClick:function(){tfCancelTransfer()}},"Cancel"));
-  return w;
-}
-
-function R(){var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
+  // Download location note for receiver
+  if(!isSend){
+    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px",color:"#f59e0b",lineHeight:1.4}},"Files saved to your Downloads folder. On iOS, check Files →var _rPending=false;
+function _inputFocused(){var el=document.activeElement;return el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT"||el.isContentEditable)}
+function R(force){
+  if(!force&&_inputFocused()){_rPending=true;return}
+  _rPending=false;
+  var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
   if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());else if(cv==="client")wrap.append(rClientView());else if(cv==="transfer")wrap.append(rTransferView());
   app.append(wrap);renderNotifBell()}
+document.addEventListener("focusout",function(){if(_rPending)setTimeout(function(){if(_rPending&&!_inputFocused())R()},50)});
 R();renderNav();syncPull(function(){R();startPoll();fetchIntake(function(){R()})});
 // Join transfer presence channel
 try{tfJoinChannel()}catch(e){console.warn("Transfer channel init:",e)}
@@ -3167,13 +3165,6 @@ if("serviceWorker" in navigator){
       reg.active.postMessage({type:"POLL_CONFIG",tokens:tokens,auth:auth?auth.access_token:"",lastChatCheck:Date.now(),intakeCount:_intakeItems.length});
     }
     if(reg.active)pushSWConfig();
-    reg.addEventListener("updatefound",function(){reg.installing.addEventListener("statechange",function(){if(this.state==="activated")pushSWConfig()})});
-    // Update SW config periodically
-    setInterval(pushSWConfig,60000);
-    // Register periodic sync if available
-    if("periodicSync" in reg){reg.periodicSync.register("drydock-poll",{minInterval:5*60*1000}).catch(function(){})}
-  }).catch(function(e){console.log("SW registration failed:",e)});
-}
-</script>
+    reg.addEventListener("updatefound",function(){reg.installing.addEve</script>
 </body>
 </html>

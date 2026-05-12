@@ -40,6 +40,7 @@ function getDeviceType(){
 
 // --- Transfer State ---
 var _tfChannel=null;
+var _tfPresenceInterval=null;
 var _tfPeers={};// {device_id: {device_id, device_name, device_type, available, timestamp}}
 var _tfPC=null;// RTCPeerConnection
 var _tfDC=null;// DataChannel
@@ -52,8 +53,9 @@ var _tfPeerDeviceId=null;
 var _tfReconnectAttempt=0;
 var _tfWakeLock=null;
 var _tfIncomingReq=null;// pending transfer request from peer
-var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName}]
+var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName, files}]
 try{_tfHistory=JSON.parse(localStorage.getItem("drydock_transfer_history"))||[]}catch(e){}
+var _tfCompleted=null;// {direction, files:[{name,size}], peerName, ts} — shown until dismissed
 
 // --- Supabase Realtime Presence ---
 function tfJoinChannel(){
@@ -123,6 +125,14 @@ function tfJoinChannel(){
   ws.onerror=function(e){console.error("WS error:",e)};
 
   _tfChannel={ws:ws,topic:channelTopic,deviceId:deviceId,deviceName:deviceName};
+
+  // Periodic presence re-track so both devices discover each other
+  // even if the initial presence_diff is missed
+  if(_tfPresenceInterval)clearInterval(_tfPresenceInterval);
+  _tfPresenceInterval=setInterval(function(){
+    if(!_tfChannel||!_tfChannel.ws||_tfChannel.ws.readyState!==1)return;
+    _tfPresenceTrack(_tfChannel.ws,_tfChannel.topic,getDeviceId(),getDeviceName(),getDeviceType());
+  },5000);
 }
 
 function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
@@ -155,7 +165,7 @@ function _tfHandlePresenceState(state){
       _tfPeers[metas.device_id]=metas;
     }
   });
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function _tfHandlePresenceDiff(diff){
@@ -179,10 +189,11 @@ function _tfHandlePresenceDiff(diff){
       }else if(metas.device_id){delete _tfPeers[metas.device_id]}
     });
   }
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function tfLeaveChannel(){
+  if(_tfPresenceInterval){clearInterval(_tfPresenceInterval);_tfPresenceInterval=null}
   if(_tfChannel&&_tfChannel.ws){
     try{_tfChannel.ws.close()}catch(e){}
   }
@@ -477,9 +488,9 @@ function _tfHandleTransferDone(){
   releaseWakeLock();
   localStorage.removeItem("drydock_transfer_state");
 
-  // Trigger downloads or offer to attach
   var peerName=_tfPeers[_tfPeerDeviceId]?_tfPeers[_tfPeerDeviceId].device_name:"Unknown";
-  _tfHistory.unshift({ts:Date.now(),direction:"receive",fileCount:_tfRecvState.files.length,totalBytes:_tfRecvState.totalBytes,status:"completed",peerName:peerName});
+  var receivedFiles=_tfRecvState.files.map(function(f){return{name:f.name,size:f.size}});
+  _tfHistory.unshift({ts:Date.now(),direction:"receive",fileCount:receivedFiles.length,totalBytes:_tfRecvState.totalBytes,status:"completed",peerName:peerName,files:receivedFiles});
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
@@ -490,12 +501,14 @@ function _tfHandleTransferDone(){
     a.href=url;a.download=f.name;
     document.body.appendChild(a);a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(function(){URL.revokeObjectURL(url)},5000);
   });
 
-  flash(_tfRecvState.files.length+" file"+((_tfRecvState.files.length!==1)?"s":"")+" received");
+  // Show completion card instead of immediately cleaning up
+  _tfCompleted={direction:"receive",files:receivedFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfRecvState.totalBytes};
+  pingSound();
   _tfCleanup();
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function _tfFinishSend(status){
@@ -504,13 +517,18 @@ function _tfFinishSend(status){
   localStorage.removeItem("drydock_transfer_state");
 
   var peerName=_tfPeers[_tfPeerDeviceId]?_tfPeers[_tfPeerDeviceId].device_name:"Unknown";
-  _tfHistory.unshift({ts:Date.now(),direction:"send",fileCount:_tfSendQueue.length,totalBytes:_tfSendState.totalBytes,status:status,peerName:peerName});
+  var sentFiles=_tfSendQueue.map(function(f){return{name:f.name,size:f.size}});
+  _tfHistory.unshift({ts:Date.now(),direction:"send",fileCount:sentFiles.length,totalBytes:_tfSendState.totalBytes,status:status,peerName:peerName,files:sentFiles});
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
-  if(status==="completed")flash("Transfer complete");
+  // Show completion card
+  if(status==="completed"){
+    _tfCompleted={direction:"send",files:sentFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfSendState.totalBytes};
+    pingSound();
+  }
   _tfCleanup();
-  if(cv==="transfer")R();
+  if(cv==="transfer")R(true);
 }
 
 function _tfCleanup(){
@@ -646,6 +664,11 @@ function rTransferView(){
     root.append(_tfRenderIncomingModal());
   }
 
+  // Completion card
+  if(_tfCompleted){
+    root.append(_tfRenderCompleted());
+  }
+
   // Active transfer progress
   if(_tfSending||_tfReceiving){
     root.append(_tfRenderProgress());
@@ -727,6 +750,39 @@ function _tfRenderIncomingModal(){
   btns.append(h("button",{class:"bp",style:{flex:1},onClick:function(){tfAcceptTransfer()}},"Accept"));
   modal.append(btns);
   return modal;
+}
+
+// --- Completion Card ---
+function _tfRenderCompleted(){
+  var c=_tfCompleted;
+  var isSend=c.direction==="send";
+  var w=h("div",{style:{padding:"16px",background:isSend?"rgba(96,165,250,0.06)":"rgba(34,197,94,0.06)",border:"1px solid "+(isSend?"rgba(96,165,250,0.2)":"rgba(34,197,94,0.2)"),borderRadius:"12px"}});
+
+  var hdr=h("div",{class:"f ac g8",style:{marginBottom:"10px"}});
+  hdr.append(h("span",{style:{fontSize:"22px"}},isSend?"✓":"⬇"));
+  var title=h("div",{class:"fc",style:{flex:1}});
+  title.append(h("span",{style:{color:isSend?"#60a5fa":"#22c55e",fontSize:"14px",fontWeight:700}},isSend?"Transfer Complete":"Files Received"));
+  title.append(h("span",{style:{color:"#888",fontSize:"11px"}},(isSend?"Sent to ":"Received from ")+c.peerName+" · "+fmtBytes(c.totalBytes)));
+  hdr.append(title);
+  hdr.append(h("button",{style:{color:"#555",fontSize:"18px",background:"none",border:"none",cursor:"pointer",padding:"4px"},onClick:function(){_tfCompleted=null;R(true)}},"×"));
+  w.append(hdr);
+
+  // File list
+  var list=h("div",{class:"fc g4"});
+  c.files.forEach(function(f){
+    var row=h("div",{class:"f ac jb",style:{padding:"4px 8px",background:"rgba(255,255,255,0.03)",borderRadius:"6px",fontSize:"11px"}});
+    row.append(h("span",{style:{color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},f.name));
+    row.append(h("span",{style:{color:"#555",flexShrink:0,marginLeft:"8px"}},fmtBytes(f.size)));
+    list.append(row);
+  });
+  w.append(list);
+
+  // Download location note for receiver
+  if(!isSend){
+    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px",color:"#f59e0b",lineHeight:1.4}},"Files saved to your Downloads folder. On iOS, check Files → Downloads or your Photos library."));
+  }
+
+  return w;
 }
 
 // --- Progress UI ---
