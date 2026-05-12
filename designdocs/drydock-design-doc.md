@@ -1,9 +1,9 @@
 # Drydock - Application Design Document
 
-Version: 1.0
+Version: 1.1
 Last updated: May 11, 2026
-Current app version: v6.1.2 (Data v4)
-Current line count: ~2,400 lines (built from 9 source modules)
+Current app version: v6.2.0 (Data v4)
+Current line count: ~3,170 lines (built from 10 source modules)
 
 
 ## What It Is
@@ -80,11 +80,12 @@ Chat system (`job_chat` Supabase table): real-time two-way messaging between mec
 
 ### Era 5: Source Split + Stabilization (v6.x)
 
-**v6.0.0** - Source code split from monolith to 9 modules:
+**v6.0.0** - Source code split from monolith to 9 modules (now 10 with transfer.js):
 
 ```
 src/
-  config.js       (39 lines)   Constants, SB connection, auth, roles, nav, version
+  shell_head.html              HTML wrapper, CSS, meta tags, CDN scripts (JSZip)
+  config.js       (44 lines)   Constants, SB connection, auth, roles, nav (incl Transfer), version
   data.js        (127 lines)   fresh(), migrate(), load(), save(), logAct(), loadJobChat()
   sync.js        (277 lines)   Chat polling, notifications, bell menu, Supabase sync, intake, job sharing
   scan.js         (40 lines)   Receipt + listing scan (Claude API)
@@ -92,14 +93,22 @@ src/
   components.js  (413 lines)   rLog, rParts, rPhotoLog, rTask, rAddTask, rIssue, rSpecs, rChecklist, rPastePanel, session calc
   views.js       (675 lines)   rLeadView, rBikeView, rSettings, rAnalytics, rExpenses, rMileage, rJobView, rClientView
   home.js        (637 lines)   rHome() - Today view, heatmap, sessions, tasks, waiting parts
-  app.js          (29 lines)   R() render, startup, polling intervals, SW registration
+  transfer.js    (480 lines)   P2P file transfer: device identity, broadcast discovery, WebRTC signaling/DataChannel, chunked transfer, zip packaging, wake lock, retry, transfer view UI
+  app.js          (37 lines)   R() with input-focus guard, render routing, startup, polling, SW registration
   build.sh                     Concatenates shell_head.html + all JS into app.html
-  shell_head.html              HTML wrapper, CSS, meta tags
 ```
 
-Build workflow: edit individual src files, run `cd src && bash build.sh`, output is `app.html`. Verified lossless against original monolith via diff.
+Build workflow: edit individual src files, run `cd src && bash build.sh`, output is `app.html`. GitHub Actions CI auto-builds app.html from src/ on push. Verified lossless against original monolith via diff.
 
 **v6.1.2** - Timezone fix across the entire app. Every day boundary calculation was using `toISOString()` which returns UTC - at 6pm Mountain time, UTC thinks it's tomorrow. Added `localDateStr()` helper using `getFullYear/getMonth/getDate` for local time. Replaced 11 instances across components.js, home.js, and views.js. Supabase timestamps stay UTC where appropriate. Also: cleaner status change labels ("Status -> in-progress" instead of just "-> in-progress") and grammar fix ("1 action" not "1 actions").
+
+**v6.2.0** - P2P file transfer via WebRTC. New `src/transfer.js` module (~480 lines). Devices on the same Supabase account discover each other via broadcast ping/pong on a Supabase Realtime channel (`transfer:{email}`). WebRTC DataChannel handles direct device-to-device file transfer — files never touch any server. Chunked protocol (64KB/chunk) with per-chunk ack, wake lock, exponential backoff retry, and resume state. Received files bundled into a timestamped zip via JSZip CDN. Transfer nav button added to config.js. iOS safe area fix for the nav bar (was hidden under the notch). Input-focus guard on `R()` prevents background re-renders from erasing text in active inputs. CI auto-build via GitHub Actions.
+
+Key implementation notes from v6.2.0 development:
+- Originally used Supabase Realtime presence API for discovery, but the raw Phoenix WebSocket presence protocol was unreliable without the JS SDK. Replaced with simple broadcast ping/pong (10s interval, 30s expiry).
+- Transfer request payload kept lightweight (file count + preview) — full manifest sent over DataChannel after WebRTC connects. Large manifests (30+ files) exceeded Supabase broadcast size limits and silently dropped.
+- Chrome throttles rapid sequential `a.click()` downloads (~10-12 max). Zipping received files into one download solved this.
+- `shell_head.html` has a persistent truncation bug when written via the Edit/Write file tools — must be written via bash heredoc to avoid file corruption at ~8KB boundary.
 
 
 ## Current Architecture
@@ -246,14 +255,14 @@ customer: intake.html, status.html (public, token-based)
 
 **Customer features without customer accounts.** Share tokens give customers access to their specific job's status and chat without requiring account creation. The intake form writes to a public table. This keeps the customer experience frictionless while maintaining security through token-based access.
 
-**Build rule: always bump APP_VERSION on every file delivery. Always run build.sh and deliver built app.html, not src files alone.**
+**Build rule: always bump APP_VERSION on every file delivery. GitHub Actions CI auto-builds app.html from src/ on push — commit only src/ changes, not app.html. Local build.sh is for testing only.**
 
 
 ## Upcoming / Planned
 
 Listed roughly by priority:
 
-- P2P file transfer (WebRTC, local network, device discovery via Supabase Realtime) - design doc complete
+- ~~P2P file transfer~~ — **Shipped in v6.2.0.** See `drydock-p2p-transfer-design.md`. Remaining work: "Send to Device" button in bike/lead photo sections, attach received files directly to entities.
 - Real Supabase schema (proper tables replacing JSON blob, SQL analytics)
 - Auth + user tracking (who changed what, audit trail)
 - Real-time subscriptions (WebSocket replacing polling)

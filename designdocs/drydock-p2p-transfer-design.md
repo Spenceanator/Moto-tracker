@@ -1,8 +1,8 @@
 # Drydock P2P File Transfer - Design Document
 
-Version: 1.0
+Version: 1.1
 Date: May 11, 2026
-Status: Ready to build
+Status: Implemented (v6.2.0)
 
 
 ## Problem
@@ -24,12 +24,12 @@ WebRTC peer-to-peer file transfer built into Drydock as a new source module (`sr
 
 ## Current App Architecture
 
-Single HTML file (`app.html`) built from 9 JS source modules via `build.sh`:
+Single HTML file (`app.html`) built from 10 JS source modules via `build.sh` (CI auto-builds on push):
 
 ```
 src/
-  shell_head.html       HTML wrapper, CSS, meta tags
-  config.js       (39)  SB connection, auth, roles, renderNav, constants, version
+  shell_head.html       HTML wrapper, CSS, meta tags, JSZip CDN
+  config.js       (44)  SB connection, auth, roles, renderNav (incl Transfer), constants, version
   data.js        (127)  fresh(), migrate(), load(), save(), logAct(), loadJobChat()
   sync.js        (277)  Chat polling, notifications, bell menu, Supabase sync, intake, job sharing
   scan.js         (40)  Receipt scan and listing scan (Claude API calls)
@@ -37,7 +37,8 @@ src/
   components.js  (413)  rLog, rParts, rPhotoLog, rTask, rAddTask, rIssue, rSpecs, rChecklist, rPastePanel, session calc
   views.js       (675)  rLeadView, rBikeView, rSettings, rAnalytics, rExpenses, rMileage, rJobView, rClientView
   home.js        (637)  rHome() with Today, heatmap, sessions, tasks, waiting parts
-  app.js          (29)  R() render, startup, polling intervals, SW registration
+  transfer.js    (480)  P2P: device identity, broadcast discovery, WebRTC, chunked transfer, zip download, wake lock, retry, UI
+  app.js          (37)  R() with input-focus guard, render routing, startup, polling, SW registration
   build.sh              Concatenates shell_head + all JS into app.html
 ```
 
@@ -105,24 +106,27 @@ function getDeviceId() {
 Device name derived from user-agent parsing: "iPhone - Safari", "Windows - Chrome", "Android - Chrome". User-configurable override stored in localStorage as `drydock_device_name`.
 
 
-### Discovery via Supabase Realtime
+### Discovery via Supabase Realtime Broadcast
 
-Supabase Realtime presence on a user-scoped channel handles device discovery. No mDNS, no broadcast, no additional infrastructure.
+~~Originally designed to use Supabase Realtime presence API, but the raw Phoenix WebSocket presence protocol proved unreliable without the Supabase JS SDK — presence diffs were inconsistent and re-tracking triggered rate limits (`Client presence rate limit exceeded`).~~
+
+**Implemented: Broadcast ping/pong discovery.** Devices announce themselves via broadcast events on the same channel used for signaling. No presence API used.
 
 ```
-Channel name: transfer:{user_id}
+Channel name: transfer:{user_email}
 
-Presence payload per device:
+Ping broadcast (every 10 seconds):
 {
-  device_id: "uuid",
-  device_name: "iPhone - Safari",
-  device_type: "mobile|desktop",
-  available: true,
-  timestamp: Date.now()
+  event: "ping",
+  from: "device_uuid",
+  fromName: "iPhone - Safari",
+  fromType: "mobile"
 }
+
+Peer expiry: 30 seconds without a ping → removed from device list
 ```
 
-When the transfer view opens, the device joins the presence channel and subscribes to presence sync events. Other devices already on the channel appear immediately. Devices leaving the channel (tab close, app background) are cleaned up by Supabase Realtime's built-in presence tracking.
+When the transfer view opens, the device joins the channel and starts pinging. Other devices collect pings into `_tfPeers` with a `lastSeen` timestamp. Stale peers (no ping for 30s) are automatically pruned. This runs entirely on the broadcast mechanism — the same one that already works for WebRTC signaling — so discovery reliability matches signaling reliability.
 
 
 ### Signaling via Supabase Realtime
@@ -213,22 +217,31 @@ Actual wire format per chunk:
 
 ### Transfer Request Flow
 
-Before any WebRTC connection, the sender requests permission from the receiver via Supabase Realtime:
+Before any WebRTC connection, the sender requests permission from the receiver via Supabase Realtime.
+
+**Note:** The transfer-req is sent as a lightweight broadcast (file count + total size + first 5 file names as preview). The full file manifest is too large for WebSocket broadcast when sending many files (30+ photos/videos would exceed Supabase's broadcast message size limit and silently drop). The full manifest is sent over the DataChannel after the WebRTC connection is established.
 
 ```
-transfer-req payload:
+transfer-req payload (lightweight, via WebSocket broadcast):
 {
   from: device_id,
   fromName: "iPhone - Safari",
+  fileCount: 28,
+  totalBytes: 1600000000,
+  preview: ["IMG_001.jpg", "IMG_002.jpg", "IMG_003.jpg", "IMG_004.jpg", "IMG_005.jpg"]
+}
+
+Full manifest (sent over DataChannel after connection):
+{
+  type: "manifest",
   files: [
     { name: "IMG_001.jpg", size: 4200000, type: "image/jpeg" },
-    { name: "IMG_002.jpg", size: 3800000, type: "image/jpeg" }
-  ],
-  totalBytes: 8000000
+    ...all files
+  ]
 }
 ```
 
-Receiver sees a prompt: "iPhone - Safari wants to send 2 files (7.6 MB). Accept / Reject"
+Receiver sees a prompt: "iPhone - Safari wants to send 28 files (1.5 GB). [first 5 names shown, '...and 23 more']  Accept / Reject"
 
 On accept, receiver broadcasts `transfer-ack` and both sides begin the WebRTC handshake. On reject, receiver broadcasts `transfer-rej` and sender sees "Transfer declined."
 
@@ -322,12 +335,11 @@ pc.oniceconnectionstatechange = function() {
 
 ### Receiving Files
 
-Receiver accumulates chunks per file in memory (array of ArrayBuffers). When all chunks for a file arrive, they're assembled into a Blob and either:
+Receiver accumulates chunks per file in memory (array of ArrayBuffers). When all chunks for a file arrive, they're assembled into a Blob.
 
-1. Triggered as a browser download (desktop) via `URL.createObjectURL` + click on a hidden `<a>` element
-2. Held in memory for the user to attach directly to a bike/lead in the app
+**Download packaging:** When multiple files are received (2+), they are bundled into a timestamped zip file using JSZip (loaded from CDN: `cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`). The zip is named `drydock-transfer-YYYY-MM-DD_HHMMSS.zip` and triggered as a single browser download. Single files download directly without zipping. This avoids Chrome's mass-download throttling which silently blocks rapid sequential `a.click()` downloads (observed: 28 files selected, only 11 downloaded).
 
-For option 2 (attach to entity), the received file is converted to a base64 data URL via FileReader and inserted into the bike/lead's photo array using the existing `compressImg()` pipeline from ui.js.
+**Completion card:** After transfer completes, a dismissible card shows the result — direction (sent/received), peer name, total size, file list with individual sizes, and a note about download location ("Saved as a zip file in your Downloads folder"). A notification sound plays on completion.
 
 
 ## UI Design
@@ -390,14 +402,19 @@ Modal overlay:
 ## Files Affected
 
 ### New
-- `src/transfer.js` - All P2P logic: device identity, Supabase Realtime presence/signaling, WebRTC connection management, chunk protocol, resume state, wake lock, retry logic, transfer view UI, progress components, incoming transfer modal, "Send to Device" button renderer.
+- `src/transfer.js` (~480 lines) - All P2P logic: device identity, Supabase Realtime broadcast discovery (ping/pong), WebRTC signaling, DataChannel connection management, chunk protocol with ack, manifest exchange over DataChannel, zip packaging of received files (JSZip), resume state, wake lock, retry logic with exponential backoff, transfer view UI, progress components, completion card, incoming transfer modal.
 
 ### Modified
-- `src/config.js` - Version bump. Add constants: CHUNK_SIZE (65536), TRANSFER_CHANNEL ("drydock-transfer"), CHUNK_TIMEOUT (5000), MAX_CHUNK_RETRIES (3), RECONNECT_DELAYS ([2000, 4000, 8000, 16000]).
-- `src/components.js` - Import and render "Send to Device" button inside `rPhotoLog` when peers are available.
-- `src/views.js` - Add transfer view route case.
-- `src/app.js` - Add nav entry for transfer view. Call transfer module startup (join presence channel) on app load. Cleanup (leave channel) on unload.
-- `build.sh` - Add `transfer.js` to the FILES array (insert before app.js in concatenation order).
+- `src/shell_head.html` - JSZip CDN script tag. iOS safe area fix: nav bar `padding-top:var(--safe-top)`, `height:calc(40px + var(--safe-top))`, app container matching padding. Previously the fixed nav sat under the iOS notch.
+- `src/config.js` - Transfer nav button in `renderNav()`. Uses inline navigation (`cv="transfer";...;R()`) to avoid scoping collision with local `var nav` DOM element.
+- `src/data.js` - Version bump to 6.2.0.
+- `src/app.js` - Transfer view route in `R()`. Input-focus guard: `R()` defers re-render when an input/textarea/select is focused (prevents text erasure from background sync/poll). `R(true)` forces through. `focusout` listener fires deferred render. Channel join on startup, leave on `beforeunload`.
+- `src/ui.js` - `nav()` calls `R(true)` for forced render on explicit navigation.
+- `build.sh` - Added `transfer.js` to FILES array between `home.js` and `app.js`.
+
+### Not modified (deferred to future)
+- `src/components.js` - "Send to Device" button in `rPhotoLog` not yet implemented.
+- `src/views.js` - No changes needed; transfer view route handled in `app.js`.
 
 
 ## Supabase Changes
