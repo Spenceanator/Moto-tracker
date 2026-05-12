@@ -2,7 +2,7 @@
 
 Version: 1.1
 Last updated: May 11, 2026
-Current app version: v6.2.0 (Data v4)
+Current app version: v6.3.0 (Data v4)
 Current line count: ~3,400 lines (built from 11 source modules)
 
 
@@ -113,6 +113,8 @@ Key implementation notes from v6.2.0 development:
 - On-screen debug console (`debug.js`) added as first build module — intercepts all console output from app startup. Triple-tap nav bar to toggle. Filter by level or `[TF]` tag for transfer diagnostics.
 - Device chat added to the transfer view — text messaging between devices via the same Supabase broadcast channel. Includes "Paste Logs" button that dumps the last 50 debug entries into chat for cross-device debugging (phone to PC to Cowork workflow).
 - Comprehensive `[TF]` diagnostic logging added throughout the transfer flow — WebSocket lifecycle, peer discovery, signaling, WebRTC/ICE, DataChannel state, chunk progress, zip packaging, error paths. See `drydock-debug-design.md` for the instrumentation guide and roadmap.
+
+**v6.3.0** - Entity-level merge sync. The old sync system treated the entire data blob as atomic (one `_ts`, last-write-wins). Now every entity (bike, lead, job, expense, trip, customer, sold item) carries its own `_ts` that only updates when that specific entity changes. Sync merges entity-by-entity — two devices editing different bikes both keep their changes. Push now reads remote and merges before writing (no more blind overwrite). Snapshot diffing in `save()` detects which entities changed without requiring call-site modifications. Migration stamps existing entities with the blob timestamp on first load. Debug console gets `[SYNC]` filter button. See `drydock-sync-design.md` for full details.
 
 
 ## Current Architecture

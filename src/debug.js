@@ -60,9 +60,9 @@ function _dbgCreate(){
   var tb=document.createElement("div");
   tb.style.cssText="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#111;border-bottom:1px solid #222;flex-shrink:0";
   // Filter buttons
-  ["all","error","warn","tf"].forEach(function(f){
+  ["all","error","warn","tf","sync"].forEach(function(f){
     var btn=document.createElement("button");
-    btn.textContent=f==="tf"?"[TF]":f.toUpperCase();
+    btn.textContent=f==="tf"?"[TF]":f==="sync"?"[SYNC]":f.toUpperCase();
     btn.style.cssText="padding:2px 8px;border-radius:4px;font-size:9px;font-weight:600;font-family:inherit;cursor:pointer;border:1px solid "+(_dbgFilter===f?"#f59e0b":"#333")+";background:"+(_dbgFilter===f?"rgba(245,158,11,0.15)":"transparent")+";color:"+(_dbgFilter===f?"#f59e0b":"#666");
     btn.onclick=function(){_dbgFilter=f;_dbgRender()};
     tb.appendChild(btn);
@@ -104,6 +104,7 @@ function _dbgCreate(){
 function _dbgFiltered(){
   if(_dbgFilter==="all")return _dbgLogs;
   if(_dbgFilter==="tf")return _dbgLogs.filter(function(l){return l.text.indexOf("[TF]")>-1});
+  if(_dbgFilter==="sync")return _dbgLogs.filter(function(l){return l.text.indexOf("[SYNC]")>-1});
   return _dbgLogs.filter(function(l){return l.level===_dbgFilter});
 }
 
@@ -128,7 +129,7 @@ function _dbgRender(){
   // Update filter button styles
   if(_dbgEl){
     var btns=_dbgEl.querySelectorAll("button");
-    ["all","error","warn","tf"].forEach(function(f,i){
+    ["all","error","warn","tf","sync"].forEach(function(f,i){
       if(btns[i]){
         btns[i].style.borderColor=_dbgFilter===f?"#f59e0b":"#333";
         btns[i].style.background=_dbgFilter===f?"rgba(245,158,11,0.15)":"transparent";

@@ -125,38 +125,97 @@ document.addEventListener("click",function(){requestNotifPermission()},{once:tru
 // ============ SUPABASE SYNC ============
 var _syncTimer=null,_syncing=0,_lastPushTs=0,_pollInt=null,_localDirty=0;
 function syncPush(){_localDirty=1;if(_syncTimer)clearTimeout(_syncTimer);_syncTimer=setTimeout(function(){_doSync()},2000)}
+
+// ---- Entity-level merge ----
+function mergeData(local,remote){
+  var m=JSON.parse(JSON.stringify(local));
+  var cols=['bikes','leads','sold','expenses','trips','jobs','customers'];
+  var stats={kept:0,taken:0,merged:0};
+  cols.forEach(function(c){
+    var lm={},rm={},ids={};
+    (local[c]||[]).forEach(function(e){if(e.id){lm[e.id]=e;ids[e.id]=1}});
+    (remote[c]||[]).forEach(function(e){if(e.id){rm[e.id]=e;ids[e.id]=1}});
+    var result=[];
+    Object.keys(ids).forEach(function(id){
+      var l=lm[id],r=rm[id];
+      if(l&&!r){result.push(l);stats.kept++}
+      else if(r&&!l){result.push(r);stats.taken++}
+      else{result.push((r._ts||0)>(l._ts||0)?r:l);stats.merged++}
+    });
+    m[c]=result;
+  });
+  // Cross-collection dedup: if an ID is in sold[], remove from bikes[]
+  var soldIds={};m.sold.forEach(function(e){if(e.id)soldIds[e.id]=1});
+  m.bikes=m.bikes.filter(function(b){return!soldIds[b.id]});
+  // Activity: merge by union, dedupe by ts+action+id
+  var actMap={};
+  (local.activity||[]).forEach(function(a){actMap[a.ts+"|"+a.action+"|"+(a.id||"")]=a});
+  (remote.activity||[]).forEach(function(a){var k=a.ts+"|"+a.action+"|"+(a.id||"");if(!actMap[k])actMap[k]=a});
+  m.activity=Object.keys(actMap).map(function(k){return actMap[k]}).sort(function(a,b){return a.ts-b.ts});
+  if(m.activity.length>2000)m.activity=m.activity.slice(-2000);
+  // Top-level fields
+  m._ts=Math.max(local._ts||0,remote._ts||0);
+  m.apiKey=local.apiKey||remote.apiKey;
+  m.leadPrompt=(local._ts||0)>=(remote._ts||0)?local.leadPrompt:remote.leadPrompt;
+  if(!m.leadPrompt)m.leadPrompt=local.leadPrompt||remote.leadPrompt||"";
+  // Checklist templates: keep from whichever blob is newer
+  if((remote._ts||0)>(local._ts||0)&&remote.checklistTemplates)m.checklistTemplates=remote.checklistTemplates;
+  // Vehicles list: merge by name
+  var vMap={};(local.vehicles||[]).forEach(function(v){vMap[v]=1});(remote.vehicles||[]).forEach(function(v){vMap[v]=1});
+  m.vehicles=Object.keys(vMap);
+  console.log("[SYNC] Merge complete — local-only:"+stats.kept+", remote-only:"+stats.taken+", both:"+stats.merged);
+  return m;
+}
+
 function _doSync(){
   if(_syncing||!getAuth())return;_syncing=1;
+  console.log("[SYNC] Push started");
   var url=SB_URL+"/rest/v1/sync?id=eq.main";
-  var now=new Date().toISOString();
-  var body=JSON.stringify({id:"main",data:JSON.parse(JSON.stringify(data)),updated_at:now});
-  fetch(url,{method:"GET",headers:sbHeaders()})
+  fetch(url+"&select=data,updated_at",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
-    var method=rows.length>0?"PATCH":"POST";
-    var postUrl=rows.length>0?url:SB_URL+"/rest/v1/sync";
+    var method,postUrl,toSend;
+    if(rows.length>0&&rows[0].data){
+      method="PATCH";postUrl=url;
+      console.log("[SYNC] Remote exists, merging before push");
+      toSend=mergeData(data,rows[0].data);
+      data=migrate(toSend);
+      localStorage.setItem(SK,JSON.stringify(data));
+      _updateSnapshot();
+    }else{
+      method="POST";postUrl=SB_URL+"/rest/v1/sync";
+      toSend=JSON.parse(JSON.stringify(data));
+      console.log("[SYNC] No remote row, creating");
+    }
+    var now=new Date().toISOString();
+    var body=JSON.stringify({id:"main",data:toSend,updated_at:now});
     var hdrs=sbHeaders();hdrs["Prefer"]="return=minimal";
     return fetch(postUrl,{method:method,headers:hdrs,body:body})
   }).then(function(r){
     _syncing=0;_localDirty=0;_lastPushTs=Date.now();
+    console.log("[SYNC] Push complete");
     var el=document.getElementById("sync-dot");if(el){el.style.background="#22c55e";el.title="Synced"}
     startPoll();
-  }).catch(function(e){_syncing=0;console.error("Sync push failed:",e);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"}})
+  }).catch(function(e){_syncing=0;console.error("[SYNC] Push failed:",e);var el=document.getElementById("sync-dot");if(el){el.style.background="#ef4444";el.title="Sync failed"}})
 }
 function syncPull(cb,force){
   if(!getAuth()){if(cb)cb();return}
+  console.log("[SYNC] Pull started, force="+!!force);
   fetch(SB_URL+"/rest/v1/sync?id=eq.main&select=data,updated_at",{method:"GET",headers:sbHeaders()})
   .then(function(r){return r.json()}).then(function(rows){
     if(rows.length>0&&rows[0].data){
       var remote=rows[0].data;var remoteTs=remote._ts||0;var localTs=data._ts||0;
       if(force||remoteTs>localTs){
-        remote.apiKey=data.apiKey||remote.apiKey;
-        data=migrate(remote);_localDirty=0;_lastPushTs=Date.now();
+        console.log("[SYNC] Merging — local _ts:"+localTs+", remote _ts:"+remoteTs);
+        var merged=mergeData(data,remote);
+        merged.apiKey=data.apiKey||merged.apiKey;
+        data=migrate(merged);_localDirty=0;_lastPushTs=Date.now();
+        _updateSnapshot();
         localStorage.setItem(SK,JSON.stringify(data));
         flash("Synced from cloud");R()
-      }
+      }else{console.log("[SYNC] Pull skipped — local is newer")}
     }else if(force){flash("Nothing in cloud yet")}
     if(cb)cb()
-  }).catch(function(e){console.error("Sync pull failed:",e);flash("Sync pull failed");if(cb)cb()})
+  }).catch(function(e){console.error("[SYNC] Pull failed:",e);flash("Sync pull failed");if(cb)cb()})
 }
 function startPoll(){if(_pollInt)return;_pollInt=setInterval(pollCheck,15000)}
 function stopPoll(){if(_pollInt){clearInterval(_pollInt);_pollInt=null}}

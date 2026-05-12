@@ -1,4 +1,8 @@
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.2.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.3.0";
+// ============ ENTITY-LEVEL CHANGE TRACKING ============
+var _lastSnap={},_snapCols=['bikes','leads','sold','expenses','trips','jobs','customers'];
+function _snapKey(e){return JSON.stringify(e,function(k,v){return k==="_ts"?undefined:v})}
+function _updateSnapshot(){_lastSnap={};_snapCols.forEach(function(c){_lastSnap[c]={};(data[c]||[]).forEach(function(e){if(e.id)_lastSnap[c][e.id]=_snapKey(e)})})}
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[
@@ -88,9 +92,14 @@ function migrate(d){
     l.hiddenIssues.forEach(function(i){if(i.cost!=null&&typeof i.cost!=="string")i.cost=String(i.cost)})});
   if(d.bikes)d.bikes=d.bikes.map(function(b){if(!b.checklistTemplates)b.checklistTemplates=JSON.parse(JSON.stringify(d.checklistTemplates));if(!b.tasks)b.tasks=[];
     b.tasks.forEach(function(t){if(t.cost==null)t.cost="";if(t.verified===undefined)t.verified=1});if(!b.specs)b.specs={};if(!b.buyDate)b.buyDate="";if(!b.actualBuyPrice)b.actualBuyPrice="";if(!b.source)b.source="";return b});
+  // Stamp _ts on entities that don't have one (migration from pre-6.3.0)
+  var blobTs=d._ts||Date.now();
+  ['bikes','leads','sold','expenses','trips','jobs','customers'].forEach(function(c){(d[c]||[]).forEach(function(e){if(e.id&&!e._ts)e._ts=blobTs})});
   return d}
 function load(){try{var r=localStorage.getItem(SK);if(!r)return fresh();return migrate(JSON.parse(r))}catch(e){return fresh()}}
-function save(){try{data._ts=Date.now();localStorage.setItem(SK,JSON.stringify(data));syncPush()}catch(e){}}
+function save(){try{var now=Date.now();data._ts=now;
+  _snapCols.forEach(function(c){if(!_lastSnap[c])_lastSnap[c]={};(data[c]||[]).forEach(function(e){if(!e.id)return;var sk=_snapKey(e);if(sk!==_lastSnap[c][e.id])e._ts=now;_lastSnap[c][e.id]=sk})});
+  localStorage.setItem(SK,JSON.stringify(data));syncPush()}catch(e){}}
 function logAct(action,detail,entityType,entityId){
   if(!data.activity)data.activity=[];
   // Auto-append entity name for context

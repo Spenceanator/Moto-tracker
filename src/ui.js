@@ -24,7 +24,7 @@ timer:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="curre
 };
 function chev(o){return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate('+(o?90:0)+'deg);transition:transform .15s"><path d="M5 3l4 4-4 4"/></svg>'}
 
-var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";
+var data=load(),cv="home",selBike=null,selLead=null,selJob=null,selClient=null,hTab="today";_updateSnapshot();
 var ui={addBike:0,addLead:0,addJob:0,showDone:0,bTab:"tasks",edit:0,rest:0,impTxt:"",impErr:"",tExp:{},tmExp:{},cfDel:null,lEdit:0,jEdit:0,iExp:{},jExp:{},showPaste:0,pasteTxt:"",pasteErr:"",photoFull:0,leadFilter:null,jobFilter:"active",sellFlow:0,sellPrice:"",sellDate:"",addExp:0,expFilter:null,expYear:new Date().getFullYear(),expDetail:null,expSub:"expenses",addTrip:0,tripActive:null,scanLead:0,scanMsgs:[],scanParsed:null,scanImg:null,scanLoading:0,scanComments:[],logEdit:null,activeTask:null,partExp:null,logType:"note",_recvParts:{}};
 var st=null;
 function ss(){if(st)clearTimeout(st);st=setTimeout(save,200)}
