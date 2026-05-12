@@ -80,9 +80,7 @@
 </style>
 </head>
 <body>
-<div id="site-nav" style="position:fixed;top:0;left:0;right:0;padding-top:var(--safe-top);height:calc(40px + var(--safe-top));background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding-left:12px;padding-right:12px;gap:6px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace;overflow-x:auto;-webkit-overflow-scrolling:touch"></div>
-<div id="app" style="padding-top:calc(40px + var(--safe-top))"></div>
-<script>
+<div id="site-nav" style="position:fixed;top:0;left:0;right:0;padding-top:var(--safe-top);height:calc(40px + var(--safe-top));background:#050505;border-bottom:1px solid #1a1a1c;display:flex;align-items:center;padding-left:12px;padding-right:12px;gap:6px;z-index:9999;font-family:'JetBrains Mono','Fira Code','SF Mono','Menlo',monospace;overflow-x:auto;-webkit-overf<script>
 var SB_URL="https://pcojcgvwstwgrbjtfbni.supabase.co";
 var SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjb2pjZ3Z3c3R3Z3JianRmYm5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzEwNTksImV4cCI6MjA4ODk0NzA1OX0.0R54Z5cXeQrMzFCQ-r6ybuN8T3fsNZOfEvG4Hqwc9mI";
 var AUTH_SK="drydock_auth";
@@ -2454,17 +2452,17 @@ function tfJoinChannel(){
   ws.onmessage=function(evt){
     try{
       var msg=JSON.parse(evt.data);
+      console.log("[TF] WS msg:",msg.event,msg.topic===channelTopic?"(ours)":"(other)",JSON.stringify(msg.payload).slice(0,200));
       if(msg.topic===channelTopic){
         if(msg.event==="presence_state"){
-          // Initial presence state - populate peers
+          console.log("[TF] presence_state keys:",Object.keys(msg.payload));
           _tfHandlePresenceState(msg.payload);
         }else if(msg.event==="presence_diff"){
-          // Presence changes
+          console.log("[TF] presence_diff joins:",Object.keys(msg.payload.joins||{}),"leaves:",Object.keys(msg.payload.leaves||{}));
           _tfHandlePresenceDiff(msg.payload);
         }else if(msg.event==="broadcast"){
-          // Signaling messages
           var p=msg.payload;
-          if(p.to&&p.to!==deviceId)return;// not for us
+          if(p.to&&p.to!==deviceId)return;
           _tfHandleBroadcast(p);
         }
       }
@@ -2494,6 +2492,7 @@ function tfJoinChannel(){
 
 function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
   if(ws.readyState!==1)return;
+  console.log("[TF] Tracking presence as:",deviceId,deviceName);
   ws.send(JSON.stringify({
     topic:topic,
     event:"presence",
@@ -2509,6 +2508,7 @@ function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
 }
 
 function _tfHandlePresenceState(state){
+  console.log("[TF] Raw presence_state:",JSON.stringify(state).slice(0,500));
   _tfPeers={};
   Object.keys(state).forEach(function(key){
     var metas=state[key].metas||state[key];
@@ -3130,13 +3130,7 @@ function _tfRenderCompleted(){
     var row=h("div",{class:"f ac jb",style:{padding:"4px 8px",background:"rgba(255,255,255,0.03)",borderRadius:"6px",fontSize:"11px"}});
     row.append(h("span",{style:{color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},f.name));
     row.append(h("span",{style:{color:"#555",flexShrink:0,marginLeft:"8px"}},fmtBytes(f.size)));
-    list.append(row);
-  });
-  w.append(list);
-
-  // Download location note for receiver
-  if(!isSend){
-    w.append(h("div",{style:{marginTop:"8px",padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"6px",fontSize:"11px",color:"#f59e0b",lineHeight:1.4}},"Files saved to your Downloads folder. On iOS, check Files →var _rPending=false;
+    list.append(rovar _rPending=false;
 function _inputFocused(){var el=document.activeElement;return el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT"||el.isContentEditable)}
 function R(force){
   if(!force&&_inputFocused()){_rPending=true;return}

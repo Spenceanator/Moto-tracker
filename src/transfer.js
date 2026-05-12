@@ -97,17 +97,17 @@ function tfJoinChannel(){
   ws.onmessage=function(evt){
     try{
       var msg=JSON.parse(evt.data);
+      console.log("[TF] WS msg:",msg.event,msg.topic===channelTopic?"(ours)":"(other)",JSON.stringify(msg.payload).slice(0,200));
       if(msg.topic===channelTopic){
         if(msg.event==="presence_state"){
-          // Initial presence state - populate peers
+          console.log("[TF] presence_state keys:",Object.keys(msg.payload));
           _tfHandlePresenceState(msg.payload);
         }else if(msg.event==="presence_diff"){
-          // Presence changes
+          console.log("[TF] presence_diff joins:",Object.keys(msg.payload.joins||{}),"leaves:",Object.keys(msg.payload.leaves||{}));
           _tfHandlePresenceDiff(msg.payload);
         }else if(msg.event==="broadcast"){
-          // Signaling messages
           var p=msg.payload;
-          if(p.to&&p.to!==deviceId)return;// not for us
+          if(p.to&&p.to!==deviceId)return;
           _tfHandleBroadcast(p);
         }
       }
@@ -137,6 +137,7 @@ function tfJoinChannel(){
 
 function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
   if(ws.readyState!==1)return;
+  console.log("[TF] Tracking presence as:",deviceId,deviceName);
   ws.send(JSON.stringify({
     topic:topic,
     event:"presence",
@@ -152,6 +153,7 @@ function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
 }
 
 function _tfHandlePresenceState(state){
+  console.log("[TF] Raw presence_state:",JSON.stringify(state).slice(0,500));
   _tfPeers={};
   Object.keys(state).forEach(function(key){
     var metas=state[key].metas||state[key];
