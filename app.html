@@ -2819,15 +2819,20 @@ function _tfHandleTransferDone(){
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
-  // Download received files
-  _tfRecvState.files.forEach(function(f){
+  // Download received files — stagger to avoid browser throttling
+  var dlFiles=_tfRecvState.files.slice();
+  function _dlNext(i){
+    if(i>=dlFiles.length)return;
+    var f=dlFiles[i];
     var url=URL.createObjectURL(f.blob);
     var a=document.createElement("a");
     a.href=url;a.download=f.name;
     document.body.appendChild(a);a.click();
     document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(url)},5000);
-  });
+    setTimeout(function(){URL.revokeObjectURL(url)},10000);
+    setTimeout(function(){_dlNext(i+1)},300);
+  }
+  _dlNext(0);
 
   // Show completion card instead of immediately cleaning up
   _tfCompleted={direction:"receive",files:receivedFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfRecvState.totalBytes};
