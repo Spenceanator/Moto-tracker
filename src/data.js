@@ -1,4 +1,4 @@
-var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.0.0";
+var SK="mototracker_data",DV=4,IRS_RATE=0.70,APP_VERSION="6.2.0";
 var DT=[
   {id:"buy",name:"Buy",items:["Title clean and matches VIN","Compression check (or engine turns over)","Frame straight - no cracks or welds","Transport plan figured out","Calculated max buy price","Checked comps for realistic sell price","Known issues identified and priced out","No title mismatch or lien issues"]},
   {id:"release",name:"Release",items:[

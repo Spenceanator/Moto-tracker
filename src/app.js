@@ -1,7 +1,10 @@
 function R(){var app=document.getElementById("app");app.innerHTML="";var wrap=h("div",{style:{paddingTop:"16px",paddingBottom:"40px"}});
-  if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());else if(cv==="client")wrap.append(rClientView());
+  if(cv==="home")wrap.append(rHome());else if(cv==="settings")wrap.append(rSettings());else if(cv==="bike")wrap.append(rBikeView());else if(cv==="lead")wrap.append(rLeadView());else if(cv==="job")wrap.append(rJobView());else if(cv==="client")wrap.append(rClientView());else if(cv==="transfer")wrap.append(rTransferView());
   app.append(wrap);renderNotifBell()}
 R();renderNav();syncPull(function(){R();startPoll();fetchIntake(function(){R()})});
+// Join transfer presence channel
+try{tfJoinChannel()}catch(e){console.warn("Transfer channel init:",e)}
+window.addEventListener("beforeunload",function(){try{tfLeaveChannel()}catch(e){}});
 document.addEventListener("visibilitychange",function(){if(!document.hidden){pollCheck();startPoll();fetchIntake(function(){R()})}});
 // Poll intake every 30s
 setInterval(function(){fetchIntake(function(){R()})},30000);

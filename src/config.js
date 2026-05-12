@@ -12,20 +12,23 @@ function refreshAuth(){
 }
 function ensureAuth(cb){var a=getAuth();if(a){cb(a);return}refreshAuth().then(function(s){if(s){cb(s)}else{window.location.href="index.html"}})}
 function sbHeaders(){var a=getAuth();return{"apikey":SB_KEY,"Authorization":"Bearer "+(a?a.access_token:SB_KEY),"Content-Type":"application/json"}}
-// Auth gate — try refresh before redirecting
+// Auth gate - try refresh before redirecting
 (function(){var s=getAuth();if(s)return;try{var raw=JSON.parse(localStorage.getItem(AUTH_SK));if(raw&&raw.refresh_token){refreshAuth().then(function(r){if(!r)window.location.href="index.html"});return}}catch(e){}window.location.href="index.html"})();
 // Auto-refresh every 45 minutes
 setInterval(function(){refreshAuth()},45*60*1000);
 
 // ============ ROLES & NAV ============
-var ROLE_MAP={"owner":true}; // default: any authenticated user is owner for now
+var ROLE_MAP={"owner":true};
 var PAGES={owner:["app","workspace"],employee:["app","workspace"],customer:["intake"]};
-function getRole(){var a=getAuth();if(!a)return null;return"owner"} // TODO: check against users table
+function getRole(){var a=getAuth();if(!a)return null;return"owner"}
 function canAccess(page){var r=getRole();if(!r)return false;return(PAGES[r]||[]).indexOf(page)>=0}
 function renderNav(){
   var nav=document.getElementById("site-nav");if(!nav)return;
   var a=getAuth();nav.innerHTML="";
   var links=[{page:"app",label:"Drydock",href:"app.html"},{page:"workspace",label:"Workspace",href:"workspace.html"}];
+  var tfBtn=document.createElement("button");tfBtn.textContent="Transfer";
+  tfBtn.style.cssText="color:"+(cv==="transfer"?"#f59e0b":"#666")+";font-size:13px;background:none;border:none;cursor:pointer;padding:8px 12px;border-radius:6px;font-family:var(--font);transition:color .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent";
+  tfBtn.onclick=function(){cv="transfer";selBike=null;selLead=null;selJob=null;selClient=null;R()};
   links.forEach(function(l){
     if(!canAccess(l.page))return;
     var isCur=l.page==="app";
@@ -33,7 +36,8 @@ function renderNav(){
     el.style.cssText="color:"+(isCur?"#f59e0b":"#666")+";font-size:13px;text-decoration:none;padding:8px 12px;border-radius:6px;font-family:var(--font);transition:color .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent";
     nav.appendChild(el);
   });
+  nav.appendChild(tfBtn);
   if(a){
-    var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out)}
+    var out=document.createElement("button");out.textContent="×";out.style.cssText="color:#444;font-size:16px;background:none;border:none;cursor:pointer;padding:8px 12px;font-family:var(--font);margin-left:auto;-webkit-tap-highlight-color:transparent";out.title="Sign out";out.onclick=function(){localStorage.removeItem(AUTH_SK);window.location.href="index.html"};nav.appendChild(out);
+  }
 }
-

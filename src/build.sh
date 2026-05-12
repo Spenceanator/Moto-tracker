@@ -16,6 +16,7 @@ FILES=(
   components.js
   views.js
   home.js
+  transfer.js
   app.js
 )
 
