@@ -399,10 +399,41 @@ Modal overlay:
 ```
 
 
+### Device Chat
+
+A simple text chat between connected devices, built on the same Supabase Realtime broadcast channel used for discovery and signaling. Primary use case: copy debug logs on the phone, paste into chat, read on PC, paste into Cowork for analysis.
+
+```
+Broadcast event: chat-msg
+{
+  event: "chat-msg",
+  from: "device_uuid",
+  fromName: "iPhone - Safari",
+  text: "message content",
+  ts: 1715443200000
+}
+```
+
+**State:** `_tfChatMsgs` array, max 100 messages. Session-only (not persisted to localStorage). Messages include timestamp, sender device ID, sender name, and text content.
+
+**UI:** Chat section appears at the bottom of the transfer view when the channel is connected. Features:
+
+- Scrollable message list with sender-aligned bubbles (own messages right, others left)
+- Textarea input with Send button (works with the input-focus guard so typing isn't interrupted)
+- "Paste Logs" button: one-tap to dump the last 50 filtered debug console entries into the chat
+- "Copy All" button: copies entire chat history to clipboard
+- "Clear" button: empties the chat
+
+**Debug log dumps** are rendered in a smaller monospace font with a scrollable container inside the chat bubble, so large log pastes don't overwhelm the view.
+
+**No WebRTC required:** Chat messages go through the Supabase Realtime broadcast, same as pings and signaling. This means chat works as soon as both devices are on the transfer view — no file transfer or WebRTC connection needed.
+
+
 ## Files Affected
 
 ### New
-- `src/transfer.js` (~480 lines) - All P2P logic: device identity, Supabase Realtime broadcast discovery (ping/pong), WebRTC signaling, DataChannel connection management, chunk protocol with ack, manifest exchange over DataChannel, zip packaging of received files (JSZip), resume state, wake lock, retry logic with exponential backoff, transfer view UI, progress components, completion card, incoming transfer modal.
+- `src/transfer.js` (~940 lines) - All P2P logic: device identity, Supabase Realtime broadcast discovery (ping/pong), WebRTC signaling, DataChannel connection management, chunk protocol with ack, manifest exchange over DataChannel, zip packaging of received files (JSZip), resume state, wake lock, retry logic with exponential backoff, device chat (broadcast-based text messaging with debug log dump), comprehensive `[TF]` diagnostic logging, transfer view UI, progress components, completion card, incoming transfer modal, chat UI.
+- `src/debug.js` (~140 lines) - On-screen debug console. Intercepts console.log/warn/error, 500-entry ring buffer, triple-tap nav bar to toggle, filter buttons (ALL/ERROR/WARN/[TF]), copy to clipboard, clear, unhandled error capture. See `drydock-debug-design.md` for full details and instrumentation guide.
 
 ### Modified
 - `src/shell_head.html` - JSZip CDN script tag. iOS safe area fix: nav bar `padding-top:var(--safe-top)`, `height:calc(40px + var(--safe-top))`, app container matching padding. Previously the fixed nav sat under the iOS notch.
@@ -410,7 +441,7 @@ Modal overlay:
 - `src/data.js` - Version bump to 6.2.0.
 - `src/app.js` - Transfer view route in `R()`. Input-focus guard: `R()` defers re-render when an input/textarea/select is focused (prevents text erasure from background sync/poll). `R(true)` forces through. `focusout` listener fires deferred render. Channel join on startup, leave on `beforeunload`.
 - `src/ui.js` - `nav()` calls `R(true)` for forced render on explicit navigation.
-- `build.sh` - Added `transfer.js` to FILES array between `home.js` and `app.js`.
+- `build.sh` - Added `debug.js` as first entry and `transfer.js` between `home.js` and `app.js` in FILES array.
 
 ### Not modified (deferred to future)
 - `src/components.js` - "Send to Device" button in `rPhotoLog` not yet implemented.

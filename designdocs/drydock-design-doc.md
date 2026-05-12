@@ -3,7 +3,7 @@
 Version: 1.1
 Last updated: May 11, 2026
 Current app version: v6.2.0 (Data v4)
-Current line count: ~3,170 lines (built from 10 source modules)
+Current line count: ~3,400 lines (built from 11 source modules)
 
 
 ## What It Is
@@ -80,11 +80,12 @@ Chat system (`job_chat` Supabase table): real-time two-way messaging between mec
 
 ### Era 5: Source Split + Stabilization (v6.x)
 
-**v6.0.0** - Source code split from monolith to 9 modules (now 10 with transfer.js):
+**v6.0.0** - Source code split from monolith to 9 modules (now 11 with debug.js and transfer.js):
 
 ```
 src/
   shell_head.html              HTML wrapper, CSS, meta tags, CDN scripts (JSZip)
+  debug.js       (140 lines)   On-screen debug console, console interception, ring buffer, filter UI
   config.js       (44 lines)   Constants, SB connection, auth, roles, nav (incl Transfer), version
   data.js        (127 lines)   fresh(), migrate(), load(), save(), logAct(), loadJobChat()
   sync.js        (277 lines)   Chat polling, notifications, bell menu, Supabase sync, intake, job sharing
@@ -93,7 +94,7 @@ src/
   components.js  (413 lines)   rLog, rParts, rPhotoLog, rTask, rAddTask, rIssue, rSpecs, rChecklist, rPastePanel, session calc
   views.js       (675 lines)   rLeadView, rBikeView, rSettings, rAnalytics, rExpenses, rMileage, rJobView, rClientView
   home.js        (637 lines)   rHome() - Today view, heatmap, sessions, tasks, waiting parts
-  transfer.js    (480 lines)   P2P file transfer: device identity, broadcast discovery, WebRTC signaling/DataChannel, chunked transfer, zip packaging, wake lock, retry, transfer view UI
+  transfer.js    (940 lines)   P2P file transfer: device identity, broadcast discovery, WebRTC, chunked transfer, zip packaging, wake lock, retry, device chat, debug logging, transfer view UI
   app.js          (37 lines)   R() with input-focus guard, render routing, startup, polling, SW registration
   build.sh                     Concatenates shell_head.html + all JS into app.html
 ```
@@ -109,6 +110,9 @@ Key implementation notes from v6.2.0 development:
 - Transfer request payload kept lightweight (file count + preview) — full manifest sent over DataChannel after WebRTC connects. Large manifests (30+ files) exceeded Supabase broadcast size limits and silently dropped.
 - Chrome throttles rapid sequential `a.click()` downloads (~10-12 max). Zipping received files into one download solved this.
 - `shell_head.html` has a persistent truncation bug when written via the Edit/Write file tools — must be written via bash heredoc to avoid file corruption at ~8KB boundary.
+- On-screen debug console (`debug.js`) added as first build module — intercepts all console output from app startup. Triple-tap nav bar to toggle. Filter by level or `[TF]` tag for transfer diagnostics.
+- Device chat added to the transfer view — text messaging between devices via the same Supabase broadcast channel. Includes "Paste Logs" button that dumps the last 50 debug entries into chat for cross-device debugging (phone to PC to Cowork workflow).
+- Comprehensive `[TF]` diagnostic logging added throughout the transfer flow — WebSocket lifecycle, peer discovery, signaling, WebRTC/ICE, DataChannel state, chunk progress, zip packaging, error paths. See `drydock-debug-design.md` for the instrumentation guide and roadmap.
 
 
 ## Current Architecture

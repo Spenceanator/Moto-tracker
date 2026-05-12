@@ -57,6 +57,10 @@ var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName, f
 try{_tfHistory=JSON.parse(localStorage.getItem("drydock_transfer_history"))||[]}catch(e){}
 var _tfCompleted=null;// {direction, files:[{name,size}], peerName, ts} — shown until dismissed
 
+// --- Device Chat ---
+var _tfChatMsgs=[];// [{ts, from, fromName, text}]
+var _tfChatMax=100;
+
 // --- Supabase Realtime Channel (broadcast only, no presence API) ---
 var _tfPingTimer=null;
 var PEER_TIMEOUT=30000;// remove peers after 30s silence
@@ -177,6 +181,7 @@ function _tfHandleBroadcast(payload){
   else if(evt==="transfer-ack")_tfHandleTransferAck(payload);
   else if(evt==="transfer-rej")_tfHandleTransferRej(payload);
   else if(evt==="transfer-resume")_tfHandleTransferResume(payload);
+  else if(evt==="chat-msg")_tfHandleChatMsg(payload);
 }
 
 // --- Transfer Request Flow ---
@@ -624,6 +629,103 @@ function _tfStartReconnect(){
   },delay);
 }
 
+// --- Device Chat ---
+function tfSendChat(text){
+  if(!text||!text.trim())return;
+  var msg={ts:Date.now(),from:getDeviceId(),fromName:getDeviceName(),text:text.trim()};
+  _tfChatMsgs.push(msg);
+  if(_tfChatMsgs.length>_tfChatMax)_tfChatMsgs=_tfChatMsgs.slice(-_tfChatMax);
+  tfBroadcast("chat-msg",{text:msg.text,ts:msg.ts});
+  if(cv==="transfer")R(true);
+}
+
+function _tfHandleChatMsg(payload){
+  _tfChatMsgs.push({ts:payload.ts||Date.now(),from:payload.from,fromName:payload.fromName||"Unknown",text:payload.text||""});
+  if(_tfChatMsgs.length>_tfChatMax)_tfChatMsgs=_tfChatMsgs.slice(-_tfChatMax);
+  if(cv==="transfer")R(true);
+  pingSound();
+}
+
+function tfSendDebugLogs(){
+  var logs=typeof _dbgFiltered==="function"?_dbgFiltered():(_dbgLogs||[]);
+  if(logs.length===0){flash("No logs to send");return}
+  var text=logs.slice(-50).map(function(l){
+    var d=new Date(l.ts);
+    return("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2)+"."+("00"+d.getMilliseconds()).slice(-3)+" ["+l.level+"] "+l.text;
+  }).join("\n");
+  tfSendChat("[DEBUG DUMP]\n"+text);
+}
+
+function _tfRenderChat(){
+  var w=h("div",{class:"fc g8"});
+  w.append(h("span",{style:{color:"#22d3ee",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"Device Chat"));
+
+  // Messages
+  var msgBox=h("div",{id:"tf-chat-msgs",style:{maxHeight:"200px",overflowY:"auto",background:"rgba(255,255,255,0.02)",border:"1px solid #222",borderRadius:"8px",padding:"8px",WebkitOverflowScrolling:"touch"}});
+  if(_tfChatMsgs.length===0){
+    msgBox.append(h("div",{style:{color:"#444",fontSize:"11px",textAlign:"center",padding:"12px"}},"No messages yet. Type below or paste logs."));
+  }else{
+    var myId=getDeviceId();
+    _tfChatMsgs.forEach(function(m){
+      var isMine=m.from===myId;
+      var row=h("div",{style:{marginBottom:"6px",textAlign:isMine?"right":"left"}});
+      var bubble=h("div",{style:{display:"inline-block",maxWidth:"85%",padding:"6px 10px",borderRadius:isMine?"10px 10px 2px 10px":"10px 10px 10px 2px",background:isMine?"rgba(34,211,238,0.08)":"rgba(255,255,255,0.05)",border:"1px solid "+(isMine?"rgba(34,211,238,0.15)":"#222"),textAlign:"left"}});
+      if(!isMine){
+        bubble.append(h("div",{style:{fontSize:"9px",color:"#22d3ee",fontWeight:600,marginBottom:"2px"}},m.fromName));
+      }
+      // Render text with newlines preserved, use pre-wrap for log dumps
+      var isLogDump=m.text.indexOf("[DEBUG DUMP]")===0;
+      bubble.append(h("div",{style:{fontSize:isLogDump?"9px":"12px",color:isLogDump?"#888":"#ccc",whiteSpace:"pre-wrap",wordBreak:"break-all",lineHeight:1.4,fontFamily:isLogDump?"var(--font)":"inherit",maxHeight:isLogDump?"150px":"none",overflowY:isLogDump?"auto":"visible"}},m.text));
+      var d=new Date(m.ts);
+      bubble.append(h("div",{style:{fontSize:"8px",color:"#444",marginTop:"2px"}},("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)));
+      row.append(bubble);
+      msgBox.append(row);
+    });
+  }
+  w.append(msgBox);
+
+  // Input row
+  var inputRow=h("div",{class:"f g6 ac"});
+  var chatInput=h("textarea",{id:"tf-chat-input",placeholder:"Type a message or paste logs...",style:{flex:1,minHeight:"36px",maxHeight:"100px",resize:"vertical",background:"rgba(255,255,255,0.05)",border:"1px solid #333",borderRadius:"6px",color:"#e5e5e5",padding:"8px 10px",fontSize:"12px",fontFamily:"var(--font)",outline:"none",lineHeight:1.4}});
+  inputRow.append(chatInput);
+
+  var sendBtn=h("button",{class:"bp",style:{padding:"8px 12px",fontSize:"11px",flexShrink:0,alignSelf:"flex-end"},onClick:function(){
+    var inp=document.getElementById("tf-chat-input");
+    if(inp&&inp.value.trim()){tfSendChat(inp.value);inp.value=""}
+  }});sendBtn.textContent="Send";
+  inputRow.append(sendBtn);
+  w.append(inputRow);
+
+  // Quick actions
+  var actions=h("div",{class:"f g6 fw"});
+  var logBtn=h("button",{class:"bs",style:{fontSize:"10px",padding:"5px 10px",color:"#22d3ee",borderColor:"rgba(34,211,238,0.2)"},onClick:function(){tfSendDebugLogs()}});
+  logBtn.textContent="Paste Logs";
+  actions.append(logBtn);
+
+  var copyBtn=h("button",{class:"bs",style:{fontSize:"10px",padding:"5px 10px",color:"#888"},onClick:function(){
+    var text=_tfChatMsgs.map(function(m){
+      var d=new Date(m.ts);
+      return("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+" ["+m.fromName+"] "+m.text;
+    }).join("\n");
+    navigator.clipboard.writeText(text).then(function(){flash("Chat copied")});
+  }});
+  copyBtn.textContent="Copy All";
+  actions.append(copyBtn);
+
+  var clearBtn=h("button",{class:"bs",style:{fontSize:"10px",padding:"5px 10px",color:"#555"},onClick:function(){_tfChatMsgs=[];R(true)}});
+  clearBtn.textContent="Clear";
+  actions.append(clearBtn);
+  w.append(actions);
+
+  // Auto-scroll chat to bottom after render
+  setTimeout(function(){
+    var el=document.getElementById("tf-chat-msgs");
+    if(el)el.scrollTop=el.scrollHeight;
+  },0);
+
+  return w;
+}
+
 // --- Format Helpers ---
 function fmtBytes(b){
   if(b<1024)return b+" B";
@@ -712,6 +814,11 @@ function rTransferView(){
       histSec.append(row);
     });
     root.append(histSec);
+  }
+
+  // Device Chat — always visible when channel is connected
+  if(connected){
+    root.append(_tfRenderChat());
   }
 
   return root;
