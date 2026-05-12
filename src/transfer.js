@@ -81,15 +81,13 @@ function tfJoinChannel(){
   var channelTopic="realtime:"+channelName;
 
   ws.onopen=function(){
-    // Join channel — broadcast self:true so we can verify our own pings arrive
+    console.log("[TF] WebSocket open, joining channel:",channelTopic);
     ws.send(JSON.stringify({topic:channelTopic,event:"phx_join",payload:{config:{broadcast:{self:false}}},ref:joinRef}));
-    // Phoenix heartbeat
     heartbeatTimer=setInterval(function(){
       heartbeatRef++;
       ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:String(heartbeatRef)}));
     },30000);
-    // Start pinging after channel is joined
-    setTimeout(function(){_tfSendPing();_tfStartPingTimer()},500);
+    setTimeout(function(){console.log("[TF] Sending initial ping");_tfSendPing();_tfStartPingTimer()},500);
   };
 
   ws.onmessage=function(evt){
@@ -98,31 +96,36 @@ function tfJoinChannel(){
       if(msg.topic===channelTopic){
         if(msg.event==="broadcast"){
           var p=msg.payload;
-          // Handle ping from other devices
           if(p.event==="ping"&&p.from&&p.from!==deviceId){
+            var isNew=!_tfPeers[p.from];
             _tfPeers[p.from]={device_id:p.from,device_name:p.fromName||"Unknown",device_type:p.fromType||"desktop",lastSeen:Date.now()};
+            if(isNew)console.log("[TF] New peer discovered:",p.fromName||p.from,p.fromType||"desktop");
             if(cv==="transfer")R(true);
           }
-          // Handle signaling and transfer messages (skip if not for us)
           else if(p.event!=="ping"){
             if(p.to&&p.to!==deviceId)return;
             _tfHandleBroadcast(p);
           }
         }else if(msg.event==="system"&&msg.payload&&msg.payload.status==="error"){
-          console.error("[TF] Channel error:",msg.payload.message);
+          console.error("[TF] Channel system error:",msg.payload.message);
+        }else if(msg.event==="phx_reply"){
+          if(msg.payload&&msg.payload.status==="ok")console.log("[TF] Channel joined OK");
+          else if(msg.payload)console.warn("[TF] Channel reply:",msg.payload.status,JSON.stringify(msg.payload.response||"").slice(0,200));
         }
       }
     }catch(e){console.error("WS message error:",e)}
   };
 
-  ws.onclose=function(){
+  ws.onclose=function(evt){
+    console.warn("[TF] WebSocket closed, code:",evt.code,"reason:",evt.reason||"none");
     if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
     if(_tfChannel){
+      console.log("[TF] Will reconnect WS in 3s");
       setTimeout(function(){if(_tfChannel)tfJoinChannel()},3000);
     }
   };
 
-  ws.onerror=function(e){console.error("WS error:",e)};
+  ws.onerror=function(e){console.error("[TF] WebSocket error:",e)};
 
   _tfChannel={ws:ws,topic:channelTopic,deviceId:deviceId,deviceName:deviceName};
 }
@@ -136,7 +139,6 @@ function _tfStartPingTimer(){
   _tfPingTimer=setInterval(function(){
     if(!_tfChannel||!_tfChannel.ws||_tfChannel.ws.readyState!==1)return;
     _tfSendPing();
-    // Expire stale peers
     var now=Date.now();var changed=false;
     Object.keys(_tfPeers).forEach(function(id){
       if(now-_tfPeers[id].lastSeen>PEER_TIMEOUT){delete _tfPeers[id];changed=true}
@@ -182,17 +184,15 @@ function tfRequestTransfer(peerDeviceId,files){
   var manifest=files.map(function(f){return{name:f.name,size:f.size,type:f.type}});
   var totalBytes=files.reduce(function(s,f){return s+f.size},0);
   _tfSendQueue=files.map(function(f){return{file:f,name:f.name,size:f.size,type:f.type}});
-  _tfSendManifest=manifest;// full manifest sent over DataChannel after connect
+  _tfSendManifest=manifest;
   _tfPeerDeviceId=peerDeviceId;
   _tfSendState={fileIndex:0,chunkIndex:0,totalChunks:0,bytesSent:0,totalBytes:totalBytes,retries:0,ackTimer:null};
 
-  // Send lightweight request — just count and size, not full file list
-  // Full manifest sent over DataChannel after connection
+  console.log("[TF] Requesting transfer to",peerDeviceId,":",files.length,"files,",fmtBytes(totalBytes));
   tfBroadcast("transfer-req",{
     to:peerDeviceId,
     fileCount:files.length,
     totalBytes:totalBytes,
-    // Include first few file names as preview
     preview:manifest.slice(0,5).map(function(f){return f.name})
   });
   _tfSending="waiting";
@@ -200,6 +200,7 @@ function tfRequestTransfer(peerDeviceId,files){
 }
 
 function _tfHandleTransferReq(payload){
+  console.log("[TF] Incoming transfer request from",payload.fromName||payload.from,":",payload.fileCount,"files,",fmtBytes(payload.totalBytes||0));
   _tfIncomingReq={
     from:payload.from,
     fromName:payload.fromName||"Unknown Device",
@@ -213,8 +214,8 @@ function _tfHandleTransferReq(payload){
 
 function tfAcceptTransfer(){
   if(!_tfIncomingReq)return;
+  console.log("[TF] Accepting transfer from",_tfIncomingReq.fromName);
   _tfPeerDeviceId=_tfIncomingReq.from;
-  // Manifest comes over DataChannel after connection — initialize with what we know
   _tfRecvState={fileIndex:0,chunkIndex:0,chunks:[],files:[],manifest:null,bytesReceived:0,totalBytes:_tfIncomingReq.totalBytes,lastMeta:null,fileCount:_tfIncomingReq.fileCount};
   _tfReceiving=true;
   tfBroadcast("transfer-ack",{to:_tfIncomingReq.from});
@@ -232,9 +233,9 @@ function tfRejectTransfer(){
 
 function _tfHandleTransferAck(payload){
   if(_tfSending!=="waiting")return;
+  console.log("[TF] Transfer accepted by peer, starting WebRTC as offerer");
   _tfSending=true;
   acquireWakeLock();
-  // Start WebRTC connection as sender (offerer)
   _tfCreateConnection(true);
 }
 
@@ -247,6 +248,7 @@ function _tfHandleTransferRej(payload){
 
 // --- WebRTC Connection ---
 function _tfCreateConnection(isOfferer){
+  console.log("[TF] Creating WebRTC connection, role:",isOfferer?"offerer":"answerer");
   if(_tfPC){try{_tfPC.close()}catch(e){}_tfPC=null}
 
   var pc=new RTCPeerConnection(RTC_CONFIG);
@@ -259,6 +261,7 @@ function _tfCreateConnection(isOfferer){
   };
 
   pc.oniceconnectionstatechange=function(){
+    console.log("[TF] ICE state:",pc.iceConnectionState);
     if(pc.iceConnectionState==="disconnected"||pc.iceConnectionState==="failed"){
       _tfStartReconnect();
     }
@@ -273,7 +276,7 @@ function _tfCreateConnection(isOfferer){
       return pc.setLocalDescription(offer);
     }).then(function(){
       tfBroadcast("offer",{to:_tfPeerDeviceId,sdp:pc.localDescription});
-    }).catch(function(e){console.error("Offer error:",e)});
+    }).catch(function(e){console.error("[TF] Offer creation error:",e)});
   }else{
     pc.ondatachannel=function(e){
       _tfDC=e.channel;
@@ -285,9 +288,10 @@ function _tfCreateConnection(isOfferer){
 function _tfSetupDataChannel(dc){
   dc.binaryType="arraybuffer";
   dc.onopen=function(){
+    console.log("[TF] DataChannel OPEN, readyState:",dc.readyState,"bufferedAmount:",dc.bufferedAmountLowThreshold);
     if(_tfSending===true){
-      // Send full manifest over DataChannel first, then start chunks
       if(_tfSendManifest){
+        console.log("[TF] Sending manifest over DataChannel:",_tfSendManifest.length,"files");
         dc.send(JSON.stringify({type:"manifest",files:_tfSendManifest}));
         _tfSendManifest=null;
       }
@@ -298,7 +302,7 @@ function _tfSetupDataChannel(dc){
     if(typeof evt.data==="string"){
       var msg=JSON.parse(evt.data);
       if(msg.type==="manifest"){
-        // Full file list from sender — now we know what's coming
+        console.log("[TF] Received manifest:",msg.files.length,"files");
         _tfRecvState.manifest=msg.files;
         _tfRecvState.fileCount=msg.files.length;
         if(cv==="transfer")R(true);
@@ -307,6 +311,7 @@ function _tfSetupDataChannel(dc){
       }else if(msg.type==="ack"){
         _tfHandleAck(msg);
       }else if(msg.type==="done"){
+        console.log("[TF] Sender signaled DONE, received",_tfRecvState.files.length,"files so far");
         _tfHandleTransferDone();
       }
     }else{
@@ -314,12 +319,14 @@ function _tfSetupDataChannel(dc){
     }
   };
   dc.onclose=function(){
+    console.warn("[TF] DataChannel CLOSED, sending:",_tfSending,"receiving:",_tfReceiving);
     if(_tfSending||_tfReceiving)_tfStartReconnect();
   };
 }
 
 function _tfHandleOffer(payload){
-  if(!_tfReceiving&&!_tfSending)return;
+  if(!_tfReceiving&&!_tfSending){console.warn("[TF] Got offer but not in transfer state, ignoring");return}
+  console.log("[TF] Received WebRTC offer from",payload.from);
   _tfCreateConnection(false);
   _tfPC.setRemoteDescription(new RTCSessionDescription(payload.sdp)).then(function(){
     return _tfPC.createAnswer();
@@ -327,17 +334,18 @@ function _tfHandleOffer(payload){
     return _tfPC.setLocalDescription(answer);
   }).then(function(){
     tfBroadcast("answer",{to:payload.from,sdp:_tfPC.localDescription});
-  }).catch(function(e){console.error("Answer error:",e)});
+  }).catch(function(e){console.error("[TF] Answer creation error:",e)});
 }
 
 function _tfHandleAnswer(payload){
-  if(!_tfPC)return;
-  _tfPC.setRemoteDescription(new RTCSessionDescription(payload.sdp)).catch(function(e){console.error("Remote desc error:",e)});
+  if(!_tfPC){console.warn("[TF] Got answer but no PC");return}
+  console.log("[TF] Received WebRTC answer");
+  _tfPC.setRemoteDescription(new RTCSessionDescription(payload.sdp)).catch(function(e){console.error("[TF] Remote desc error:",e)});
 }
 
 function _tfHandleIce(payload){
   if(!_tfPC)return;
-  _tfPC.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(function(e){console.error("ICE error:",e)});
+  _tfPC.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(function(e){console.error("[TF] ICE candidate error:",e)});
 }
 
 // --- Chunked Send ---
@@ -346,7 +354,7 @@ function _tfSendNextChunk(){
 
   var si=_tfSendState;
   if(si.fileIndex>=_tfSendQueue.length){
-    // All files sent
+    console.log("[TF] All files sent, signaling DONE");
     _tfDC.send(JSON.stringify({type:"done"}));
     _tfFinishSend("completed");
     return;
@@ -362,8 +370,8 @@ function _tfSendNextChunk(){
 
   var reader=new FileReader();
   reader.onload=function(e){
-    if(!_tfDC||_tfDC.readyState!=="open")return;
-    // Send meta
+    if(!_tfDC||_tfDC.readyState!=="open"){console.warn("[TF] DC not open when chunk ready, state:",_tfDC?_tfDC.readyState:"null");return}
+    if(si.chunkIndex===0||si.chunkIndex%10===0)console.log("[TF] Sending file",si.fileIndex+1+"/"+_tfSendQueue.length,"("+fileObj.name+") chunk",si.chunkIndex+"/"+totalChunks);
     _tfDC.send(JSON.stringify({
       type:"meta",
       fileIndex:si.fileIndex,
@@ -373,10 +381,7 @@ function _tfSendNextChunk(){
       fileSize:fileObj.size,
       fileType:fileObj.type
     }));
-    // Send binary
     _tfDC.send(e.target.result);
-
-    // Start ack timeout
     si.retries=0;
     _tfStartAckTimer();
   };
@@ -388,10 +393,11 @@ function _tfStartAckTimer(){
   if(si.ackTimer)clearTimeout(si.ackTimer);
   si.ackTimer=setTimeout(function(){
     si.retries++;
+    console.warn("[TF] Ack timeout, retry",si.retries+"/"+MAX_CHUNK_RETRIES,"for file",si.fileIndex,"chunk",si.chunkIndex);
     if(si.retries>=MAX_CHUNK_RETRIES){
+      console.error("[TF] Max chunk retries exceeded, starting reconnect");
       _tfStartReconnect();
     }else{
-      // Resend current chunk
       _tfSendNextChunk();
     }
   },CHUNK_TIMEOUT);
@@ -408,13 +414,11 @@ function _tfHandleAck(msg){
     si.chunkIndex++;
 
     if(si.chunkIndex>=si.totalChunks){
-      // File complete, move to next
       si.fileIndex++;
       si.chunkIndex=0;
       si.totalChunks=0;
     }
 
-    // Persist resume state
     _tfPersistSendState();
 
     if(cv==="transfer")R();
@@ -428,22 +432,22 @@ function _tfHandleChunkData(buffer){
   var meta=rs.lastMeta;
   if(!meta)return;
 
-  // Initialize file chunks array if needed
   if(!rs.chunks[meta.fileIndex])rs.chunks[meta.fileIndex]=[];
   rs.chunks[meta.fileIndex][meta.chunkIndex]=buffer;
   rs.bytesReceived+=buffer.byteLength;
 
-  // Send ack
   if(_tfDC&&_tfDC.readyState==="open"){
     _tfDC.send(JSON.stringify({type:"ack",fileIndex:meta.fileIndex,chunkIndex:meta.chunkIndex,status:"ok"}));
   }
 
-  // Check if file is complete
+  if(meta.chunkIndex===0||meta.chunkIndex%10===0)console.log("[TF] Receiving file",meta.fileIndex+1,"("+meta.fileName+") chunk",meta.chunkIndex+"/"+meta.totalChunks,fmtBytes(rs.bytesReceived)+"/"+fmtBytes(rs.totalBytes));
+
   if(meta.chunkIndex===meta.totalChunks-1){
     var allChunks=rs.chunks[meta.fileIndex];
     var blob=new Blob(allChunks,{type:meta.fileType});
     rs.files.push({name:meta.fileName,size:meta.fileSize,type:meta.fileType,blob:blob});
-    rs.chunks[meta.fileIndex]=null;// free memory
+    rs.chunks[meta.fileIndex]=null;
+    console.log("[TF] File complete:",meta.fileName,"("+fmtBytes(meta.fileSize)+"), total files received:",rs.files.length);
   }
 
   _tfPersistRecvState();
@@ -461,25 +465,33 @@ function _tfHandleTransferDone(){
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
-  // Package received files into a timestamped zip
   var dlFiles=_tfRecvState.files.slice();
+  console.log("[TF] Transfer done, preparing download for",dlFiles.length,"files, JSZip available:",typeof JSZip!=="undefined");
   if(typeof JSZip!=="undefined"&&dlFiles.length>1){
+    console.log("[TF] Bundling",dlFiles.length,"files into zip");
     var zip=new JSZip();
-    dlFiles.forEach(function(f){zip.file(f.name,f.blob)});
+    dlFiles.forEach(function(f){
+      console.log("[TF] Adding to zip:",f.name,"("+fmtBytes(f.blob.size)+")");
+      zip.file(f.name,f.blob);
+    });
     var now=new Date();
     var ts=now.getFullYear()+"-"+("0"+(now.getMonth()+1)).slice(-2)+"-"+("0"+now.getDate()).slice(-2)+"_"+("0"+now.getHours()).slice(-2)+("0"+now.getMinutes()).slice(-2)+("0"+now.getSeconds()).slice(-2);
     var zipName="drydock-transfer-"+ts+".zip";
     zip.generateAsync({type:"blob"}).then(function(blob){
+      console.log("[TF] Zip generated:",zipName,"("+fmtBytes(blob.size)+"), triggering download");
       var url=URL.createObjectURL(blob);
       var a=document.createElement("a");
       a.href=url;a.download=zipName;
       document.body.appendChild(a);a.click();
       document.body.removeChild(a);
       setTimeout(function(){URL.revokeObjectURL(url)},10000);
+    }).catch(function(err){
+      console.error("[TF] Zip generation FAILED:",err);
     });
   }else{
-    // Single file or no JSZip — download directly
-    dlFiles.forEach(function(f){
+    console.log("[TF] Direct download (single file or no JSZip)");
+    dlFiles.forEach(function(f,i){
+      console.log("[TF] Downloading file",i+1+"/"+dlFiles.length+":",f.name,"("+fmtBytes(f.blob.size)+")");
       var url=URL.createObjectURL(f.blob);
       var a=document.createElement("a");
       a.href=url;a.download=f.name;
@@ -489,7 +501,6 @@ function _tfHandleTransferDone(){
     });
   }
 
-  // Show completion card instead of immediately cleaning up
   _tfCompleted={direction:"receive",files:receivedFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfRecvState.totalBytes};
   pingSound();
   _tfCleanup();
@@ -497,6 +508,7 @@ function _tfHandleTransferDone(){
 }
 
 function _tfFinishSend(status){
+  console.log("[TF] Send finished, status:",status,"files:",_tfSendQueue.length);
   _tfSending=false;
   releaseWakeLock();
   localStorage.removeItem("drydock_transfer_state");
@@ -507,7 +519,6 @@ function _tfFinishSend(status){
   if(_tfHistory.length>20)_tfHistory=_tfHistory.slice(0,20);
   try{localStorage.setItem("drydock_transfer_history",JSON.stringify(_tfHistory))}catch(e){}
 
-  // Show completion card
   if(status==="completed"){
     _tfCompleted={direction:"send",files:sentFiles,peerName:peerName,ts:Date.now(),totalBytes:_tfSendState.totalBytes};
     pingSound();
@@ -571,7 +582,6 @@ function _tfPersistRecvState(){
 }
 
 function _tfHandleTransferResume(payload){
-  // Peer wants to resume - re-establish connection
   if(_tfSending){
     _tfSendState.chunkIndex=payload.chunkIndex||0;
     _tfSendState.fileIndex=payload.fileIndex||0;
@@ -599,8 +609,9 @@ document.addEventListener("visibilitychange",function(){
 
 // --- Reconnect ---
 function _tfStartReconnect(){
+  console.warn("[TF] Reconnect attempt",_tfReconnectAttempt+1+"/"+RECONNECT_DELAYS.length);
   if(_tfReconnectAttempt>=RECONNECT_DELAYS.length){
-    // Give up
+    console.error("[TF] Max reconnect attempts exhausted, giving up");
     if(_tfSending)_tfFinishSend("failed");
     else if(_tfReceiving){_tfReceiving=false;releaseWakeLock();_tfCleanup();flash("Transfer failed");if(cv==="transfer")R()}
     return;
@@ -625,16 +636,13 @@ function fmtBytes(b){
 function rTransferView(){
   var root=h("div",{class:"fc g16"});
 
-  // Header
   var hdr=h("div",{class:"f ac g10"});
   hdr.append(h("button",{class:"ib",onClick:function(){nav("home")}},ic("back")));
   hdr.append(h("h2",{style:{fontSize:"18px",fontWeight:800,color:"#f59e0b",letterSpacing:"-0.5px",flex:1}},"TRANSFER"));
-  // Device name edit
   var myName=getDeviceName();
   hdr.append(h("span",{style:{color:"#555",fontSize:"11px"}},myName));
   root.append(hdr);
 
-  // Connection status
   var connected=_tfChannel&&_tfChannel.ws&&_tfChannel.ws.readyState===1;
   var statusDot=h("div",{class:"f ac g6"});
   statusDot.append(h("span",{style:{width:"6px",height:"6px",borderRadius:"50%",background:connected?"#22c55e":"#ef4444",display:"inline-block"}}));
@@ -644,22 +652,18 @@ function rTransferView(){
   }
   root.append(statusDot);
 
-  // Incoming transfer request modal
   if(_tfIncomingReq){
     root.append(_tfRenderIncomingModal());
   }
 
-  // Completion card
   if(_tfCompleted){
     root.append(_tfRenderCompleted());
   }
 
-  // Active transfer progress
   if(_tfSending||_tfReceiving){
     root.append(_tfRenderProgress());
   }
 
-  // Nearby Devices
   if(!_tfSending&&!_tfReceiving){
     var devSec=h("div",{class:"fc g8"});
     devSec.append(h("span",{style:{color:"#f59e0b",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"Nearby Devices"));
@@ -681,7 +685,6 @@ function rTransferView(){
         info.append(h("span",{style:{color:"#22c55e",fontSize:"10px"}},"Online now"));
         card.append(info);
         var sendBtn=h("button",{class:"bp",style:{padding:"8px 14px",fontSize:"12px"},onClick:function(){
-          // Open file picker
           var inp=document.createElement("input");inp.type="file";inp.multiple=true;inp.accept="image/*,video/*";
           inp.onchange=function(){
             if(inp.files.length>0){
@@ -696,7 +699,6 @@ function rTransferView(){
     root.append(devSec);
   }
 
-  // Transfer History
   if(_tfHistory.length>0&&!_tfSending&&!_tfReceiving){
     var histSec=h("div",{class:"fc g6"});
     histSec.append(h("span",{style:{color:"#888",fontSize:"10px",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}},"Transfer History"));
@@ -724,7 +726,6 @@ function _tfRenderIncomingModal(){
   title.append(h("span",{style:{color:"#888",fontSize:"12px"}},req.fileCount+" file"+(req.fileCount!==1?"s":"")+" ("+fmtBytes(req.totalBytes)+")"));
   modal.append(title);
 
-  // Show preview of first few file names
   if(req.preview&&req.preview.length>0){
     var fileList=h("div",{class:"fc g2",style:{marginBottom:"12px"}});
     req.preview.forEach(function(name){
@@ -758,7 +759,6 @@ function _tfRenderCompleted(){
   hdr.append(h("button",{style:{color:"#555",fontSize:"18px",background:"none",border:"none",cursor:"pointer",padding:"4px"},onClick:function(){_tfCompleted=null;R(true)}},"×"));
   w.append(hdr);
 
-  // File list
   var list=h("div",{class:"fc g4"});
   c.files.forEach(function(f){
     var row=h("div",{class:"f ac jb",style:{padding:"4px 8px",background:"rgba(255,255,255,0.03)",borderRadius:"6px",fontSize:"11px"}});
@@ -768,7 +768,6 @@ function _tfRenderCompleted(){
   });
   w.append(list);
 
-  // Download location note for receiver
   if(!isSend){
     var dlNote=c.files.length>1?"Saved as a zip file in your Downloads folder.":"Saved to your Downloads folder.";
     dlNote+=" On iOS, check Files → Downloads.";
@@ -795,7 +794,6 @@ function _tfRenderProgress(){
     var doneBytes=isSend?state.bytesSent:state.bytesReceived;
     var overallPct=Math.round((doneBytes/totalBytes)*100);
 
-    // Per-file progress
     files.forEach(function(f,i){
       var fileTotal=Math.ceil(f.size/CHUNK_SIZE);
       var fileDone=0;
@@ -812,14 +810,12 @@ function _tfRenderProgress(){
       fInfo.append(h("span",{style:{color:"#ccc"}},f.name));
       fInfo.append(h("span",{style:{color:"#888"}},filePct+"%  "+fmtBytes(fileDone*CHUNK_SIZE)+"/"+fmtBytes(f.size)));
       fRow.append(fInfo);
-      // Segmented progress bar
       var barBg=h("div",{style:{height:"6px",background:"rgba(255,255,255,0.05)",borderRadius:"3px",overflow:"hidden"}});
       barBg.append(h("div",{style:{height:"100%",width:filePct+"%",background:"#f59e0b",borderRadius:"3px",transition:"width 0.2s"}}));
       fRow.append(barBg);
       w.append(fRow);
     });
 
-    // Overall
     var oRow=h("div",{class:"fc g2",style:{marginTop:"4px",paddingTop:"8px",borderTop:"1px solid #1a1a1a"}});
     var oInfo=h("div",{class:"f ac jb",style:{fontSize:"12px",fontWeight:600}});
     oInfo.append(h("span",{style:{color:"#f59e0b"}},"Overall"));

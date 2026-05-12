@@ -6,8 +6,9 @@
 OUT="${1:-../app.html}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Order matters — later files reference earlier ones
+# Order matters - later files reference earlier ones
 FILES=(
+  debug.js
   config.js
   data.js
   sync.js
