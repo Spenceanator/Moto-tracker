@@ -56,13 +56,15 @@ var _tfHistory=[];// [{ts, direction, fileCount, totalBytes, status, peerName, f
 try{_tfHistory=JSON.parse(localStorage.getItem("drydock_transfer_history"))||[]}catch(e){}
 var _tfCompleted=null;// {direction, files:[{name,size}], peerName, ts} — shown until dismissed
 
-// --- Supabase Realtime Presence ---
+// --- Supabase Realtime Channel (broadcast only, no presence API) ---
+var _tfPingTimer=null;
+var PEER_TIMEOUT=30000;// remove peers after 30s silence
+var PING_INTERVAL=10000;// broadcast ping every 10s
+
 function tfJoinChannel(){
   var auth=getAuth();if(!auth)return;
-  // Use Supabase Realtime via WebSocket
   var userId=auth.email||"unknown";
   var channelName="transfer:"+userId;
-  // Build Realtime URL
   var wsUrl=SB_URL.replace("https://","wss://").replace("http://","ws://")+"/realtime/v1/websocket?apikey="+SB_KEY+"&vsn=1.0.0";
 
   if(_tfChannel){tfLeaveChannel()}
@@ -71,8 +73,6 @@ function tfJoinChannel(){
   var deviceName=getDeviceName();
   var deviceType=getDeviceType();
 
-  // Use Supabase JS client pattern via REST-based channel simulation
-  // Since we don't have the Supabase JS SDK, we'll use a lightweight WebSocket approach
   var ws=new WebSocket(wsUrl);
   var heartbeatRef=0;
   var heartbeatTimer=null;
@@ -80,38 +80,35 @@ function tfJoinChannel(){
   var channelTopic="realtime:"+channelName;
 
   ws.onopen=function(){
-    // Join channel
-    ws.send(JSON.stringify({topic:channelTopic,event:"phx_join",payload:{config:{presence:{key:deviceId},broadcast:{self:false}}},ref:joinRef}));
-    // Start heartbeat
+    // Join channel — broadcast self:true so we can verify our own pings arrive
+    ws.send(JSON.stringify({topic:channelTopic,event:"phx_join",payload:{config:{broadcast:{self:false}}},ref:joinRef}));
+    // Phoenix heartbeat
     heartbeatTimer=setInterval(function(){
       heartbeatRef++;
       ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:String(heartbeatRef)}));
     },30000);
-    // Track presence
-    setTimeout(function(){
-      _tfPresenceTrack(ws,channelTopic,deviceId,deviceName,deviceType);
-    },500);
+    // Start pinging after channel is joined
+    setTimeout(function(){_tfSendPing();_tfStartPingTimer()},500);
   };
 
   ws.onmessage=function(evt){
     try{
       var msg=JSON.parse(evt.data);
-      console.log("[TF] WS msg:",msg.event,msg.topic===channelTopic?"(ours)":"(other)",JSON.stringify(msg.payload).slice(0,200));
       if(msg.topic===channelTopic){
-        if(msg.event==="presence_state"){
-          console.log("[TF] presence_state keys:",Object.keys(msg.payload));
-          _tfHandlePresenceState(msg.payload);
-        }else if(msg.event==="presence_diff"){
-          console.log("[TF] presence_diff joins:",Object.keys(msg.payload.joins||{}),"leaves:",Object.keys(msg.payload.leaves||{}));
-          _tfHandlePresenceDiff(msg.payload);
-        }else if(msg.event==="broadcast"){
+        if(msg.event==="broadcast"){
           var p=msg.payload;
-          if(p.to&&p.to!==deviceId)return;
-          _tfHandleBroadcast(p);
+          // Handle ping from other devices
+          if(p.event==="ping"&&p.from&&p.from!==deviceId){
+            _tfPeers[p.from]={device_id:p.from,device_name:p.fromName||"Unknown",device_type:p.fromType||"desktop",lastSeen:Date.now()};
+            if(cv==="transfer")R(true);
+          }
+          // Handle signaling and transfer messages (skip if not for us)
+          else if(p.event!=="ping"){
+            if(p.to&&p.to!==deviceId)return;
+            _tfHandleBroadcast(p);
+          }
         }else if(msg.event==="system"&&msg.payload&&msg.payload.status==="error"){
           console.error("[TF] Channel error:",msg.payload.message);
-        }else if(msg.event==="phx_close"){
-          console.warn("[TF] Channel closed by server, will reconnect");
         }
       }
     }catch(e){console.error("WS message error:",e)}
@@ -119,7 +116,6 @@ function tfJoinChannel(){
 
   ws.onclose=function(){
     if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
-    // Reconnect after a delay if we should still be connected
     if(_tfChannel){
       setTimeout(function(){if(_tfChannel)tfJoinChannel()},3000);
     }
@@ -130,66 +126,26 @@ function tfJoinChannel(){
   _tfChannel={ws:ws,topic:channelTopic,deviceId:deviceId,deviceName:deviceName};
 }
 
-function _tfPresenceTrack(ws,topic,deviceId,deviceName,deviceType){
-  if(ws.readyState!==1)return;
-  console.log("[TF] Tracking presence as:",deviceId,deviceName);
-  ws.send(JSON.stringify({
-    topic:topic,
-    event:"presence",
-    payload:{type:"presence",event:"track",payload:{
-      device_id:deviceId,
-      device_name:deviceName,
-      device_type:deviceType,
-      available:true,
-      timestamp:Date.now()
-    }},
-    ref:String(Date.now())
-  }));
+function _tfSendPing(){
+  tfBroadcast("ping",{fromType:getDeviceType()});
 }
 
-function _tfHandlePresenceState(state){
-  console.log("[TF] Raw presence_state:",JSON.stringify(state).slice(0,500));
-  _tfPeers={};
-  Object.keys(state).forEach(function(key){
-    var metas=state[key].metas||state[key];
-    if(Array.isArray(metas)){
-      metas.forEach(function(m){
-        if(m.device_id&&m.device_id!==getDeviceId()){
-          _tfPeers[m.device_id]=m;
-        }
-      });
-    }else if(metas.device_id&&metas.device_id!==getDeviceId()){
-      _tfPeers[metas.device_id]=metas;
-    }
-  });
-  if(cv==="transfer")R(true);
-}
-
-function _tfHandlePresenceDiff(diff){
-  if(diff.joins){
-    Object.keys(diff.joins).forEach(function(key){
-      var metas=(diff.joins[key].metas||diff.joins[key]);
-      if(Array.isArray(metas)){
-        metas.forEach(function(m){
-          if(m.device_id&&m.device_id!==getDeviceId())_tfPeers[m.device_id]=m;
-        });
-      }else if(metas.device_id&&metas.device_id!==getDeviceId()){
-        _tfPeers[metas.device_id]=metas;
-      }
+function _tfStartPingTimer(){
+  if(_tfPingTimer)clearInterval(_tfPingTimer);
+  _tfPingTimer=setInterval(function(){
+    if(!_tfChannel||!_tfChannel.ws||_tfChannel.ws.readyState!==1)return;
+    _tfSendPing();
+    // Expire stale peers
+    var now=Date.now();var changed=false;
+    Object.keys(_tfPeers).forEach(function(id){
+      if(now-_tfPeers[id].lastSeen>PEER_TIMEOUT){delete _tfPeers[id];changed=true}
     });
-  }
-  if(diff.leaves){
-    Object.keys(diff.leaves).forEach(function(key){
-      var metas=(diff.leaves[key].metas||diff.leaves[key]);
-      if(Array.isArray(metas)){
-        metas.forEach(function(m){if(m.device_id)delete _tfPeers[m.device_id]});
-      }else if(metas.device_id){delete _tfPeers[metas.device_id]}
-    });
-  }
-  if(cv==="transfer")R(true);
+    if(changed&&cv==="transfer")R(true);
+  },PING_INTERVAL);
 }
 
 function tfLeaveChannel(){
+  if(_tfPingTimer){clearInterval(_tfPingTimer);_tfPingTimer=null}
   if(_tfChannel&&_tfChannel.ws){
     try{_tfChannel.ws.close()}catch(e){}
   }
